@@ -866,6 +866,7 @@ export default function QueryEditorPage() {
   const [history, setHistory]   = useState<{ query: string; time: Date; result: QueryResult }[]>(() => []);
   const [copied, setCopied]     = useState(false);
   const [rightPanel, setRightPanel] = useState<null | "history" | "ai" | "browser">(null);
+  const [showExitModal, setShowExitModal] = useState(false);
   const [selectedDatabase, setSelectedDatabase] = useState<string>("");
   const [isRecording, setIsRecording] = useState(false);
   const [sessionRecords, setSessionRecords] = useState<
@@ -876,6 +877,13 @@ export default function QueryEditorPage() {
   const toggleZenMode = useUIStore((s) => s.toggleZenMode);
   const setZenMode = useUIStore((s) => s.setZenMode);
 
+  // Keep a ref so the popstate closure always sees the latest zenMode
+  const zenModeRef = useRef(zenMode);
+  useEffect(() => { zenModeRef.current = zenMode; }, [zenMode]);
+
+  // Store the handler so confirmExit can remove it before navigating
+  const popstateHandlerRef = useRef<(() => void) | null>(null);
+
   // Escape key exits zen mode
   useEffect(() => {
     if (!zenMode) return;
@@ -885,6 +893,49 @@ export default function QueryEditorPage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [zenMode, setZenMode]);
+
+  // Back-button guard — only intercepts when in zen/fullscreen mode
+  useEffect(() => {
+    window.history.pushState({ qeGuard: true }, "");
+
+    const handlePopState = () => {
+      if (!zenModeRef.current) {
+        // Normal mode — let the navigation proceed freely
+        window.removeEventListener("popstate", handlePopState);
+        popstateHandlerRef.current = null;
+        window.history.back();
+        return;
+      }
+      // Fullscreen mode — re-push guard so we stay on the page, show modal
+      window.history.pushState({ qeGuard: true }, "");
+      setShowExitModal(true);
+    };
+
+    popstateHandlerRef.current = handlePopState;
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+      popstateHandlerRef.current = null;
+      setZenMode(false);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const confirmExit = useCallback(() => {
+    setShowExitModal(false);
+    setZenMode(false);
+    // Remove listener BEFORE navigating to prevent re-triggering
+    if (popstateHandlerRef.current) {
+      window.removeEventListener("popstate", popstateHandlerRef.current);
+      popstateHandlerRef.current = null;
+    }
+    // Stack: [..., prev-page, query-editor, guard] — go(-2) lands on prev-page
+    window.history.go(-2);
+  }, [setZenMode]);
+
+  const cancelExit = useCallback(() => {
+    setShowExitModal(false);
+  }, []);
 
   const selectedCluster = useMemo(
     () => clusters.find((c: ClusterListItem) => c.id === selectedClusterId) ?? null,
@@ -1083,6 +1134,7 @@ export default function QueryEditorPage() {
   }, [sessionRecords, selectedCluster]);
 
   return (
+    <>
     <div className="h-full flex flex-col overflow-hidden">
       {!zenMode && <Topbar title="Query Editor" subtitle="Execute SQL or Redis commands on any running cluster" />}
 
@@ -1533,6 +1585,45 @@ export default function QueryEditorPage() {
         )}
       </div>
     </div>
+
+      {/* ── Exit confirmation modal ───────────────────────────────────────── */}
+      {showExitModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-surface border border-surface-border rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+            {/* Header */}
+            <div className="flex items-start gap-4 p-5 pb-4">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                <FontAwesomeIcon icon={faTriangleExclamation} className="text-amber-400" />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold text-fg-base mb-1">Leave Query Editor?</h2>
+                <p className="text-xs text-fg-muted leading-relaxed">
+                  Your current query and session history are saved. You can return any time and pick up right where you left off.
+                </p>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex gap-3 px-5 py-4 border-t border-surface-border bg-surface-50">
+              <button
+                onClick={cancelExit}
+                className="btn-secondary flex-1 text-sm py-2"
+                autoFocus
+              >
+                Stay Here
+              </button>
+              <button
+                onClick={confirmExit}
+                className="flex-1 text-sm py-2 rounded-lg font-medium bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 hover:border-red-500/50 transition-colors"
+              >
+                <FontAwesomeIcon icon={faArrowRight} className="mr-1.5 text-xs" />
+                Leave
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
