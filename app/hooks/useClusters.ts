@@ -120,6 +120,6 @@ export function useSchemaContext(clusterId: string, database: string) {
     queryKey: clusterKeys.schema(clusterId, database),
     queryFn: () => browserApi.getFullSchema(clusterId, database),
     enabled: !!clusterId && !!database,
-    staleTime: 60_000,
+    staleTime: 0,
   });
 }

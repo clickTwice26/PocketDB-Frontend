@@ -8,9 +8,11 @@ import {
   faExpand, faCompress, faWandMagicSparkles, faArrowUp,
   faStop, faArrowRight, faRotateRight, faRobot,
   faChevronDown, faMagnifyingGlass, faXmark,
+  faCircle, faSquare, faFilePdf,
 } from "@fortawesome/free-solid-svg-icons";
 import { useClusters, useExecuteQuery, useDatabases, useSchemaContext } from "@/hooks/useClusters";
 import Topbar from "@/components/layout/Topbar";
+import SchemaBrowserPanel from "@/components/clusters/SchemaBrowserPanel";
 import { useUIStore } from "@/store/ui";
 import { cn } from "@/lib/utils";
 import type { ClusterListItem, QueryResult } from "@/types";
@@ -174,6 +176,41 @@ function parseMessageParts(text: string): MessagePart[] {
   return parts.length ? parts : [{ type: "text", content: text }];
 }
 
+// ─── Streaming typewriter animation ──────────────────────────────────────────
+
+function StreamingText({ content }: { content: string }) {
+  const [displayed, setDisplayed] = useState("");
+  const contentRef = useRef(content);
+  const frameRef = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
+
+  // Keep ref in sync with latest content without triggering re-runs
+  useEffect(() => { contentRef.current = content; });
+
+  // Single RAF loop on mount — chases contentRef
+  useEffect(() => {
+    const tick = () => {
+      setDisplayed((prev) => {
+        const target = contentRef.current;
+        if (prev.length < target.length) {
+          // Reveal ~5 chars per frame ≈ 300 chars/sec at 60 fps — smooth but fast
+          return target.slice(0, Math.min(prev.length + 5, target.length));
+        }
+        return prev;
+      });
+      frameRef.current = requestAnimationFrame(tick);
+    };
+    frameRef.current = requestAnimationFrame(tick);
+    return () => { if (frameRef.current !== null) cancelAnimationFrame(frameRef.current); };
+  }, []); // intentionally runs only once
+
+  return (
+    <>
+      {displayed}
+      <span className="inline-block w-[2px] h-[13px] bg-brand-400 ml-[2px] align-text-bottom rounded-[1px] animate-pulse" />
+    </>
+  );
+}
+
 function AIAssistPanel({
   dbType,
   dbVersion,
@@ -181,6 +218,7 @@ function AIAssistPanel({
   clusterName,
   database,
   onUseSQL,
+  onExecute,
 }: {
   dbType: string;
   dbVersion: string;
@@ -188,6 +226,7 @@ function AIAssistPanel({
   clusterName: string;
   database: string;
   onUseSQL: (sql: string) => void;
+  onExecute: (sql: string) => void;
 }) {
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<AIChatMessage[]>([]);
@@ -196,7 +235,7 @@ function AIAssistPanel({
   const abortRef = useRef<{ abort: boolean }>({ abort: false });
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const { data: schemaData, isLoading: schemaLoading } = useSchemaContext(clusterId, database);
+  const { data: schemaData, isLoading: schemaLoading, refetch: refetchSchema } = useSchemaContext(clusterId, database);
   const schemaText = schemaData?.schema_text ?? "";
   const tableCount = schemaData?.table_count ?? 0;
 
@@ -237,6 +276,17 @@ function AIAssistPanel({
     setStreaming(true);
     abortRef.current.abort = false;
 
+    // Always fetch a fresh schema so the AI sees the current table/column state
+    let freshSchemaText = schemaText;
+    if (clusterId && database && !isRedis) {
+      try {
+        const result = await refetchSchema();
+        freshSchemaText = result.data?.schema_text ?? schemaText;
+      } catch {
+        // fall back to last known schema
+      }
+    }
+
     try {
       const stream = aiApi.chatStream({
         messages: apiMessages,
@@ -244,7 +294,7 @@ function AIAssistPanel({
         dbType,
         dbVersion,
         clusterName,
-        schemaContext: schemaText,
+        schemaContext: freshSchemaText,
       });
       for await (const chunk of stream) {
         if (abortRef.current.abort) break;
@@ -270,7 +320,7 @@ function AIAssistPanel({
       setStreaming(false);
       setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)));
     }
-  }, [prompt, clusterId, dbType, dbVersion, clusterName, schemaText, messages, streaming]);
+  }, [prompt, clusterId, database, isRedis, dbType, dbVersion, clusterName, schemaText, refetchSchema, messages, streaming]);
 
   const handleStop = () => { abortRef.current.abort = true; };
 
@@ -299,7 +349,31 @@ function AIAssistPanel({
         </div>
       );
     }
-    // While streaming, render raw content to avoid partial-fence glitches
+
+    // Thinking dots — no content yet but actively streaming
+    if (msg.streaming && !msg.content) {
+      return (
+        <div key={idx} className="mb-4">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <div className="w-5 h-5 rounded bg-brand-600/20 flex items-center justify-center shrink-0">
+              <FontAwesomeIcon icon={faRobot} className="text-brand-400" style={{ fontSize: "9px" }} />
+            </div>
+            <span className="text-2xs text-brand-400 font-semibold">PocketDB AI</span>
+          </div>
+          <div className="pl-6 flex items-center gap-1 py-1">
+            {[0, 160, 320].map((delay, i) => (
+              <span
+                key={i}
+                className="w-1.5 h-1.5 rounded-full bg-brand-400/70 animate-bounce"
+                style={{ animationDelay: `${delay}ms`, animationDuration: "1s" }}
+              />
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // While streaming, use typewriter animation; after done, parse fences normally
     const parts = msg.streaming
       ? [{ type: "text" as const, content: msg.content }]
       : parseMessageParts(msg.content);
@@ -317,10 +391,10 @@ function AIAssistPanel({
             if (part.type === "text") {
               return (
                 <p key={pi} className="text-xs text-fg-muted leading-relaxed whitespace-pre-wrap break-words">
-                  {part.content}
-                  {msg.streaming && pi === parts.length - 1 && (
-                    <span className="inline-block w-1.5 h-3 bg-brand-400 animate-pulse ml-0.5 align-text-bottom" />
-                  )}
+                  {msg.streaming
+                    ? <StreamingText content={part.content} />
+                    : part.content
+                  }
                 </p>
               );
             }
@@ -344,14 +418,21 @@ function AIAssistPanel({
                 <pre className="px-4 py-3 text-xs font-mono text-green-300 overflow-x-auto whitespace-pre leading-relaxed">
                   {part.content}
                 </pre>
-                {/* Use in Editor button */}
-                <div className="px-3 py-2 border-t border-surface-border/50 bg-[#161b22]">
+                {/* Use in Editor + Execute buttons */}
+                <div className="px-3 py-2 border-t border-surface-border/50 bg-[#161b22] flex gap-2">
                   <button
                     onClick={() => { onUseSQL(part.content); toast.success("Inserted into editor"); }}
-                    className="btn-primary text-xs py-1.5 px-3 w-full flex items-center justify-center gap-1.5"
+                    className="btn-secondary text-xs py-1.5 px-3 flex-1 flex items-center justify-center gap-1.5"
                   >
                     <FontAwesomeIcon icon={faArrowRight} className="text-xs" />
                     Use in Editor
+                  </button>
+                  <button
+                    onClick={() => { onExecute(part.content); toast.success("Running query…"); }}
+                    className="btn-primary text-xs py-1.5 px-3 flex-1 flex items-center justify-center gap-1.5"
+                  >
+                    <FontAwesomeIcon icon={faPlay} className="text-xs" />
+                    Execute
                   </button>
                 </div>
               </div>
@@ -782,10 +863,14 @@ export default function QueryEditorPage() {
   const setSelectedClusterId = useUIStore((s) => s.setSelectedClusterId);
   const [query, setQuery]       = useState("SELECT version();");
   const [result, setResult]     = useState<QueryResult | null>(null);
-  const [history, setHistory]   = useState<{ query: string; time: Date; result: QueryResult }[]>([]);
+  const [history, setHistory]   = useState<{ query: string; time: Date; result: QueryResult }[]>(() => []);
   const [copied, setCopied]     = useState(false);
-  const [rightPanel, setRightPanel] = useState<null | "history" | "ai">(null);
+  const [rightPanel, setRightPanel] = useState<null | "history" | "ai" | "browser">(null);
   const [selectedDatabase, setSelectedDatabase] = useState<string>("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [sessionRecords, setSessionRecords] = useState<
+    { query: string; database: string; clusterName: string; dbType: string; time: Date; result: QueryResult }[]
+  >([]);
 
   const zenMode = useUIStore((s) => s.zenMode);
   const toggleZenMode = useUIStore((s) => s.toggleZenMode);
@@ -812,6 +897,37 @@ export default function QueryEditorPage() {
 
   const { data: databases = [], refetch: refetchDatabases } = useDatabases(isRedis ? "" : (selectedClusterId ?? ""));
 
+  const historyStorageKey = useMemo(
+    () => selectedCluster ? `pocketdb_history_${selectedCluster.name}` : null,
+    [selectedCluster],
+  );
+
+  // Load history from localStorage when cluster changes
+  useEffect(() => {
+    if (!historyStorageKey) { setHistory([]); return; }
+    try {
+      const raw = localStorage.getItem(historyStorageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { query: string; time: string; result: QueryResult }[];
+        setHistory(parsed.map((e) => ({ ...e, time: new Date(e.time) })));
+      } else {
+        setHistory([]);
+      }
+    } catch {
+      setHistory([]);
+    }
+  }, [historyStorageKey]);
+
+  // Persist history to localStorage on every change
+  useEffect(() => {
+    if (!historyStorageKey) return;
+    try {
+      localStorage.setItem(historyStorageKey, JSON.stringify(
+        history.map((e) => ({ ...e, time: e.time.toISOString() })),
+      ));
+    } catch { /* storage full — silently skip */ }
+  }, [history, historyStorageKey]);
+
   const handleSelectCluster = (id: string) => {
     setSelectedClusterId(id || null);
     const c = clusters.find((c: ClusterListItem) => c.id === id);
@@ -820,18 +936,31 @@ export default function QueryEditorPage() {
     setSelectedDatabase("");
   };
 
-  const handleRun = useCallback(() => {
-    if (!selectedClusterId || !query.trim()) return;
+  const handleRun = useCallback((sqlOverride?: string) => {
+    const sql = sqlOverride ?? query;
+    if (!selectedClusterId || !sql.trim()) return;
     execQuery(
-      { clusterId: selectedClusterId, query, database: selectedDatabase || undefined },
+      { clusterId: selectedClusterId, query: sql, database: selectedDatabase || undefined },
       {
         onSuccess: (data) => {
           setResult(data);
-          setHistory((h) => [{ query, time: new Date(), result: data }, ...h.slice(0, 29)]);
+          setHistory((h) => [{ query: sql, time: new Date(), result: data }, ...h.slice(0, 29)]);
+          // Append to session recording if active
+          setSessionRecords((prev) => {
+            if (!isRecording) return prev;
+            return [...prev, {
+              query: sql,
+              database: selectedDatabase,
+              clusterName: selectedCluster?.name ?? "",
+              dbType: dbType,
+              time: new Date(),
+              result: data,
+            }];
+          });
         },
       },
     );
-  }, [selectedClusterId, query, selectedDatabase, execQuery]);
+  }, [selectedClusterId, query, selectedDatabase, execQuery, isRecording, selectedCluster, dbType]);
 
   const handleCopy = useCallback(() => {
     if (!result) return;
@@ -851,6 +980,107 @@ export default function QueryEditorPage() {
     const s = Math.floor((Date.now() - d.getTime()) / 1000);
     return s < 60 ? `${s}s ago` : `${Math.floor(s / 60)}m ago`;
   };
+
+  // ── Session recording ───────────────────────────────────────────────────
+  const exportSessionPDF = useCallback(() => {
+    if (sessionRecords.length === 0) return;
+    const cluster = selectedCluster;
+    const now = new Date();
+    const dateStr = now.toLocaleString();
+
+    const escHtml = (s: string) =>
+      String(s ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+
+    const renderResult = (rec: typeof sessionRecords[0]) => {
+      const r = rec.result;
+      if (r.error) {
+        return `<div class="error-box">&#9888; Error: ${escHtml(r.error)}</div>`;
+      }
+      if (r.columns.length === 0) {
+        return `<div class="ok-box">&#10003; ${r.row_count} row${r.row_count !== 1 ? "s" : ""} affected &middot; ${r.execution_time_ms}ms</div>`;
+      }
+      const header = r.columns.map((c) => `<th>${escHtml(c)}</th>`).join("");
+      const rows = r.rows
+        .slice(0, 500)
+        .map((row) => `<tr>${row.map((cell) => `<td>${cell === null ? '<span class="null">NULL</span>' : escHtml(String(cell))}</td>`).join("")}</tr>`)
+        .join("");
+      const truncNote = r.rows.length > 500 ? `<p class="trunc">(showing first 500 of ${r.row_count} rows)</p>` : "";
+      return `<table><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>${truncNote}`;
+    };
+
+    const body = sessionRecords
+      .map((rec, i) => `
+        <div class="entry">
+          <div class="entry-header">
+            <span class="entry-num">#${i + 1}</span>
+            <span class="entry-db">${escHtml(rec.clusterName)}${rec.database ? " &rsaquo; " + escHtml(rec.database) : ""}</span>
+            <span class="entry-time">${rec.time.toLocaleTimeString()}</span>
+            ${rec.result.error ? '<span class="badge-err">ERROR</span>' : `<span class="badge-ok">${rec.result.row_count} rows &middot; ${rec.result.execution_time_ms}ms</span>`}
+          </div>
+          <pre class="sql-block">${escHtml(rec.query.trim())}</pre>
+          <div class="result-wrap">${renderResult(rec)}</div>
+        </div>`).
+      join("");
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>PocketDB Session &mdash; ${dateStr}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 12px; color: #1a1a2e; background: #fff; padding: 24px; }
+  .cover { border-bottom: 3px solid #6366f1; padding-bottom: 20px; margin-bottom: 28px; }
+  .cover h1 { font-size: 22px; color: #4f46e5; font-weight: 700; margin-bottom: 4px; }
+  .cover .meta { color: #64748b; font-size: 11px; }
+  .cover .meta strong { color: #334155; }
+  .entry { margin-bottom: 28px; page-break-inside: avoid; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+  .entry-header { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; flex-wrap: wrap; }
+  .entry-num { font-weight: 700; color: #6366f1; font-size: 12px; }
+  .entry-db { color: #475569; font-size: 11px; flex: 1; }
+  .entry-time { color: #94a3b8; font-size: 10px; }
+  .badge-ok { font-size: 10px; background: #dcfce7; color: #166534; padding: 2px 7px; border-radius: 9px; font-weight: 600; }
+  .badge-err { font-size: 10px; background: #fee2e2; color: #991b1b; padding: 2px 7px; border-radius: 9px; font-weight: 600; }
+  .sql-block { font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 11.5px; background: #0f172a; color: #7dd3fc; padding: 14px 16px; white-space: pre-wrap; word-break: break-all; line-height: 1.6; }
+  .result-wrap { padding: 12px 14px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  thead tr { background: #f1f5f9; }
+  th { text-align: left; padding: 6px 10px; font-weight: 600; color: #475569; border-bottom: 2px solid #e2e8f0; white-space: nowrap; }
+  td { padding: 5px 10px; border-bottom: 1px solid #f1f5f9; color: #1e293b; font-family: 'Consolas', monospace; word-break: break-all; }
+  tr:last-child td { border-bottom: none; }
+  tr:nth-child(even) { background: #fafafa; }
+  .null { color: #94a3b8; font-style: italic; }
+  .error-box { background: #fff1f2; border: 1px solid #fecdd3; color: #be123c; border-radius: 6px; padding: 10px 14px; font-size: 11.5px; font-family: monospace; }
+  .ok-box { color: #15803d; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 9px 14px; font-size: 11.5px; }
+  .trunc { font-size: 10px; color: #94a3b8; margin-top: 6px; }
+  .footer { margin-top: 32px; border-top: 1px solid #e2e8f0; padding-top: 12px; color: #94a3b8; font-size: 10px; text-align: center; }
+  @media print { body { padding: 0; } .entry { page-break-inside: avoid; } }
+</style>
+</head>
+<body>
+  <div class="cover">
+    <h1>&#128190; PocketDB Session Report</h1>
+    <div class="meta">
+      <strong>Generated:</strong> ${dateStr} &nbsp;&middot;&nbsp;
+      <strong>Cluster:</strong> ${escHtml(cluster?.name ?? "unknown")} &nbsp;&middot;&nbsp;
+      <strong>Engine:</strong> ${escHtml((cluster?.db_type ?? "").toUpperCase())} ${escHtml(cluster?.db_version ?? "")} &nbsp;&middot;&nbsp;
+      <strong>Queries:</strong> ${sessionRecords.length}
+    </div>
+  </div>
+  ${body}
+  <div class="footer">PocketDB &mdash; Session exported on ${dateStr}</div>
+  <script>window.onload = () => { window.print(); }<\/script>
+</body>
+</html>`;
+
+    const win = window.open("", "_blank");
+    if (!win) { toast.error("Popup blocked — allow popups for PDF export"); return; }
+    win.document.write(html);
+    win.document.close();
+  }, [sessionRecords, selectedCluster]);
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -923,6 +1153,19 @@ export default function QueryEditorPage() {
             )}
           </button>
 
+          {/* Browser button */}
+          <button
+            onClick={() => setRightPanel((p) => p === "browser" ? null : "browser")}
+            className={cn(
+              "btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5",
+              rightPanel === "browser" && "bg-brand-500/10 border-brand-500/40 text-brand-400",
+            )}
+            title="Schema Browser"
+          >
+            <FontAwesomeIcon icon={faDatabase} className="text-xs" />
+            <span className="hidden sm:inline">Browse</span>
+          </button>
+
           {/* AI button */}
           <button
             onClick={() => setRightPanel((p) => p === "ai" ? null : "ai")}
@@ -936,6 +1179,37 @@ export default function QueryEditorPage() {
             <span className="hidden sm:inline">AI</span>
             <span className="text-xs bg-brand-500/20 text-brand-400 px-1 rounded leading-none font-medium">✨</span>
           </button>
+
+          {/* Record / Stop+Export buttons */}
+          {!isRecording ? (
+            <button
+              onClick={() => { setSessionRecords([]); setIsRecording(true); toast.success("Recording started"); }}
+              className="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5 hover:border-red-500/60 hover:text-red-400"
+              title="Start session recording"
+            >
+              <FontAwesomeIcon icon={faCircle} className="text-red-500 text-xs" />
+              <span className="hidden sm:inline">Record</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                setIsRecording(false);
+                if (sessionRecords.length === 0) { toast.error("No queries recorded yet"); return; }
+                exportSessionPDF();
+                toast.success(`Exporting ${sessionRecords.length} quer${sessionRecords.length !== 1 ? "ies" : "y"} as PDF`);
+              }}
+              className="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5 border-red-500/50 text-red-400 bg-red-500/5 hover:bg-red-500/10 animate-pulse"
+              title="Stop recording and export PDF"
+            >
+              <FontAwesomeIcon icon={faSquare} className="text-red-500 text-xs" />
+              <span className="hidden sm:inline">Stop</span>
+              {sessionRecords.length > 0 && (
+                <span className="text-xs bg-red-500/20 text-red-400 px-1.5 rounded-full leading-none">
+                  {sessionRecords.length}
+                </span>
+              )}
+            </button>
+          )}
 
           <div className="w-px h-4 bg-surface-border" />
 
@@ -957,7 +1231,7 @@ export default function QueryEditorPage() {
             <span className="hidden sm:inline">Clear</span>
           </button>
           <button
-            onClick={handleRun}
+            onClick={() => handleRun()}
             disabled={isPending || !selectedClusterId || !query.trim()}
             className="btn-primary text-xs py-1.5 px-4"
           >
@@ -968,6 +1242,35 @@ export default function QueryEditorPage() {
           </button>
         </div>
       </div>
+
+      {/* ── Recording indicator banner ────────────────────────────────────── */}
+      {isRecording && (
+        <div className="shrink-0 flex items-center gap-3 px-4 py-1.5 border-b border-red-500/30 bg-red-500/5">
+          <span className="relative flex h-2 w-2 shrink-0">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
+          </span>
+          <p className="text-xs text-red-400 font-medium">
+            Recording&hellip;
+            {sessionRecords.length > 0 && (
+              <span className="ml-1.5 text-red-300 font-normal">
+                {sessionRecords.length} {sessionRecords.length === 1 ? "query" : "queries"} captured
+              </span>
+            )}
+          </p>
+          <button
+            onClick={() => {
+              if (sessionRecords.length === 0) { setIsRecording(false); toast.error("No queries captured"); return; }
+              setIsRecording(false);
+              exportSessionPDF();
+              toast.success(`Exporting ${sessionRecords.length} ${sessionRecords.length !== 1 ? "queries" : "query"} as PDF`);
+            }}
+            className="ml-auto text-xs text-red-400 hover:text-red-300 underline underline-offset-2"
+          >
+            Stop &amp; Export PDF
+          </button>
+        </div>
+      )}
 
       {/* ── Redis mode banner ─────────────────────────────────────────────── */}
       {selectedCluster && isRedis && (
@@ -1098,25 +1401,30 @@ export default function QueryEditorPage() {
           </div>
         </div>
 
-        {/* ── Right panel: History / AI ───────────────────────────────── */}
+        {/* ── Right panel: History / AI / Browser ─────────────────────── */}
         {rightPanel && (
-          <div className="w-80 xl:w-96 shrink-0 flex flex-col border-l border-surface-border bg-surface overflow-hidden">
+          <div className={cn(
+            "shrink-0 flex flex-col border-l border-surface-border bg-surface overflow-hidden",
+            rightPanel === "browser" ? "w-[680px] xl:w-[760px]" : "w-80 xl:w-96",
+          )}>
             {/* Panel header */}
             <div className="shrink-0 flex items-center justify-between px-3 py-2.5 border-b border-surface-border bg-surface-50">
               <span className="flex items-center gap-2 text-xs font-semibold text-fg-base">
                 <FontAwesomeIcon
-                  icon={rightPanel === "history" ? faClockRotateLeft : faRobot}
+                  icon={rightPanel === "history" ? faClockRotateLeft : rightPanel === "browser" ? faDatabase : faRobot}
                   className="text-brand-400 text-xs"
                 />
-                {rightPanel === "history" ? "Query History" : "AI Assistant"}
+                {rightPanel === "history" ? "Query History" : rightPanel === "browser" ? "Schema Browser" : "AI Assistant"}
               </span>
               <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => setRightPanel(rightPanel === "history" ? "ai" : "history")}
-                  className="text-2xs text-fg-subtle hover:text-fg-base transition-colors px-1.5 py-0.5 rounded hover:bg-surface-100"
-                >
-                  Switch to {rightPanel === "history" ? "AI" : "History"}
-                </button>
+                {rightPanel !== "browser" && (
+                  <button
+                    onClick={() => setRightPanel(rightPanel === "history" ? "ai" : "history")}
+                    className="text-2xs text-fg-subtle hover:text-fg-base transition-colors px-1.5 py-0.5 rounded hover:bg-surface-100"
+                  >
+                    Switch to {rightPanel === "history" ? "AI" : "History"}
+                  </button>
+                )}
                 <button
                   onClick={() => setRightPanel(null)}
                   className="w-6 h-6 flex items-center justify-center rounded-md text-fg-subtle hover:text-fg-base hover:bg-surface-100 transition-colors"
@@ -1176,6 +1484,18 @@ export default function QueryEditorPage() {
                   clusterName={selectedCluster?.name ?? ""}
                   database={selectedDatabase}
                   onUseSQL={(sql) => { setQuery(sql); toast.success("SQL inserted into editor"); }}
+                  onExecute={(sql) => { setQuery(sql); handleRun(sql); }}
+                />
+              </div>
+            )}
+
+            {/* Browser content */}
+            {rightPanel === "browser" && (
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <SchemaBrowserPanel
+                  clusterId={selectedClusterId}
+                  dbType={dbType}
+                  initialDatabase={selectedDatabase || undefined}
                 />
               </div>
             )}
