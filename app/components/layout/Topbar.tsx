@@ -4,8 +4,8 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-  faPlus, faMoon, faSun, faBars, faLeaf, faCheck, faChevronDown,
-  faRightFromBracket, faUser,
+  faMoon, faSun, faBars, faLeaf, faCheck, faChevronDown,
+  faRightFromBracket,
 } from "@fortawesome/free-solid-svg-icons";
 import { useUIStore } from "@/store/ui";
 import type { Theme } from "@/store/ui";
@@ -25,7 +25,7 @@ const THEMES: { id: Theme; label: string; icon: typeof faMoon; desc: string }[] 
 ];
 
 export default function Topbar({ title, subtitle }: TopbarProps) {
-  const { setCreateModalOpen, theme, setTheme, setMobileNavOpen } = useUIStore();
+  const { theme, setTheme, setMobileNavOpen } = useUIStore();
   const { data: clusters = [] } = useClusters();
   const { user, logout } = useAuthStore();
   const router = useRouter();
@@ -275,14 +275,6 @@ export default function Topbar({ title, subtitle }: TopbarProps) {
           </>
         )}
 
-        {/* Create cluster */}
-        <button
-          onClick={() => setCreateModalOpen(true)}
-          className="btn-primary text-sm"
-        >
-          <FontAwesomeIcon icon={faPlus} />
-          <span className="hidden sm:inline">New Cluster</span>
-        </button>
       </div>
     </header>
   );

@@ -1,13 +1,15 @@
 "use client";
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faPlay, faTrash, faSpinner, faDatabase, faCircleDot,
   faCode, faTerminal, faTriangleExclamation, faCopy, faCheck,
   faLayerGroup, faBolt, faLightbulb, faClockRotateLeft,
+  faExpand, faCompress,
 } from "@fortawesome/free-solid-svg-icons";
 import { useClusters, useExecuteQuery } from "@/hooks/useClusters";
 import Topbar from "@/components/layout/Topbar";
+import { useUIStore } from "@/store/ui";
 import { cn } from "@/lib/utils";
 import type { ClusterListItem, QueryResult } from "@/types";
 
@@ -146,12 +148,27 @@ export default function QueryEditorPage() {
   const { data: clusters = [] } = useClusters("running");
   const { mutate: execQuery, isPending } = useExecuteQuery();
 
-  const [selectedClusterId, setSelectedClusterId] = useState("");
+  const selectedClusterId = useUIStore((s) => s.selectedClusterId) ?? "";
+  const setSelectedClusterId = useUIStore((s) => s.setSelectedClusterId);
   const [query, setQuery]   = useState("SELECT version();");
   const [result, setResult] = useState<QueryResult | null>(null);
   const [history, setHistory] = useState<{ query: string; time: Date }[]>([]);
   const [copied, setCopied]   = useState(false);
   const [activeTab, setActiveTab] = useState<"snippets" | "history">("snippets");
+
+  const zenMode = useUIStore((s) => s.zenMode);
+  const toggleZenMode = useUIStore((s) => s.toggleZenMode);
+  const setZenMode = useUIStore((s) => s.setZenMode);
+
+  // Escape key exits zen mode
+  useEffect(() => {
+    if (!zenMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setZenMode(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zenMode, setZenMode]);
 
   const selectedCluster = useMemo(
     () => clusters.find((c: ClusterListItem) => c.id === selectedClusterId) ?? null,
@@ -164,7 +181,7 @@ export default function QueryEditorPage() {
   const snippets = SNIPPETS[dbType] ?? SNIPPETS.postgres;
 
   const handleSelectCluster = (id: string) => {
-    setSelectedClusterId(id);
+    setSelectedClusterId(id || null);
     const c = clusters.find((c: ClusterListItem) => c.id === id);
     setQuery(DEFAULT_QUERY[c?.db_type ?? "postgres"] ?? DEFAULT_QUERY.postgres);
     setResult(null);
@@ -204,7 +221,7 @@ export default function QueryEditorPage() {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <Topbar title="Query Editor" subtitle="Execute SQL or Redis commands on any running cluster" />
+      {!zenMode && <Topbar title="Query Editor" subtitle="Execute SQL or Redis commands on any running cluster" />}
 
       {/* ── Cluster toolbar ───────────────────────────────────────────────── */}
       <div className="shrink-0 flex items-center gap-2.5 px-4 py-2.5 border-b border-surface-border bg-surface-50/70">
@@ -239,6 +256,13 @@ export default function QueryEditorPage() {
         )}
 
         <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={toggleZenMode}
+            className="btn-secondary text-xs py-1.5 px-2.5"
+            title={zenMode ? "Exit fullscreen (Esc)" : "Fullscreen mode"}
+          >
+            <FontAwesomeIcon icon={zenMode ? faCompress : faExpand} />
+          </button>
           <span className="hidden md:inline-flex items-center px-1.5 py-0.5 rounded border border-surface-border bg-surface text-2xs text-fg-subtle font-mono tracking-tight">
             ⌘↵
           </span>

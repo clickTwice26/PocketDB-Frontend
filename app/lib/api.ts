@@ -10,6 +10,13 @@ const api = axios.create({
 api.interceptors.response.use(
   (res) => res,
   (err) => {
+    if (err.response?.status === 401) {
+      // Skip for the logout endpoint itself — it doesn't need auth.
+      const url: string = err.config?.url ?? "";
+      if (!url.includes("/auth/logout") && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("auth:unauthorized"));
+      }
+    }
     const message =
       err.response?.data?.detail ?? err.message ?? "An unexpected error occurred";
     return Promise.reject(new Error(typeof message === "string" ? message : JSON.stringify(message)));

@@ -5,7 +5,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faDatabase, faServer, faPlay, faStop, faRotate, faTrash,
   faArrowLeft, faSpinner, faTerminal, faChartBar, faNetworkWired,
-  faCopy, faCheck, faCircle,
+  faCircle,
 } from "@fortawesome/free-solid-svg-icons";
 import { useCluster, useClusterStats, useClusterAction, useDeleteCluster } from "@/hooks/useClusters";
 import Topbar from "@/components/layout/Topbar";
@@ -41,8 +41,6 @@ export default function ClusterDetailPage() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [logs, setLogs] = useState<string | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
-
   const handleDelete = async () => {
     if (!confirm(`Delete cluster "${cluster?.name}"? This will remove all containers and data.`)) return;
     deleteCluster(params.id, {
@@ -64,19 +62,7 @@ export default function ClusterDetailPage() {
     }
   };
 
-  const copyConnectionString = (node: Node) => {
-    if (!cluster || !node.host_port) return;
-    let str = "";
-    if (cluster.db_type === "redis") {
-      str = `redis://localhost:${node.host_port}`;
-    } else if (cluster.db_type === "mysql") {
-      str = `mysql://${cluster.db_user ?? "root"}:***@localhost:${node.host_port}/${cluster.db_name ?? ""}`;
-    } else {
-      str = `postgresql://${cluster.db_user ?? "postgres"}:***@localhost:${node.host_port}/${cluster.db_name ?? "postgres"}`;
-    }
-    navigator.clipboard.writeText(str);
-    toast.success("Connection string copied!");
-  };
+
 
   if (isLoading) {
     return (
@@ -280,13 +266,6 @@ export default function ClusterDetailPage() {
                           {node.status}
                         </span>
                         <button
-                          onClick={() => copyConnectionString(node)}
-                          className="btn-secondary text-xs"
-                          title="Copy connection string"
-                        >
-                          <FontAwesomeIcon icon={faCopy} />
-                        </button>
-                        <button
                           onClick={() => fetchLogs(node.id)}
                           className="btn-secondary text-xs"
                         >
@@ -296,18 +275,7 @@ export default function ClusterDetailPage() {
                       </div>
                     </div>
 
-                    {/* Connection string */}
-                    {node.host_port && (
-                      <div className="mt-3 bg-surface-100 rounded-lg p-2.5 font-mono text-xs text-slate-400 flex items-center justify-between gap-2">
-                        <span className="truncate">
-                          {cluster.db_type === "redis"
-                            ? `redis://localhost:${node.host_port}`
-                            : cluster.db_type === "mysql"
-                            ? `mysql://${cluster.db_user ?? "root"}:***@localhost:${node.host_port}/${cluster.db_name ?? ""}`
-                            : `postgresql://${cluster.db_user ?? "postgres"}:***@localhost:${node.host_port}/${cluster.db_name ?? "postgres"}`}
-                        </span>
-                      </div>
-                    )}
+
                   </div>
                 );
               })

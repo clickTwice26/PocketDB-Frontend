@@ -15,6 +15,9 @@ interface UIStore {
   setSelectedClusterId: (id: string | null) => void;
   theme: Theme;
   setTheme: (theme: Theme) => void;
+  zenMode: boolean;
+  setZenMode: (v: boolean) => void;
+  toggleZenMode: () => void;
 }
 
 export const useUIStore = create<UIStore>()(
@@ -30,13 +33,16 @@ export const useUIStore = create<UIStore>()(
       setSelectedClusterId: (id) => set({ selectedClusterId: id }),
       theme: "dark",
       setTheme: (theme) => set({ theme }),
+      zenMode: false,
+      setZenMode: (v) => set({ zenMode: v }),
+      toggleZenMode: () => set((s) => ({ zenMode: !s.zenMode })),
     }),
     {
       name: "pocketdb-ui",
       partialize: (state) => ({
-        theme:       state.theme,
-        sidebarOpen: state.sidebarOpen,
-        // mobileNavOpen intentionally not persisted — always starts closed
+        theme:             state.theme,
+        sidebarOpen:       state.sidebarOpen,
+        selectedClusterId: state.selectedClusterId,
       }),
     }
   )

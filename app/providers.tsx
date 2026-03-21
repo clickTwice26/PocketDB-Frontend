@@ -10,12 +10,19 @@ import { useAuthStore } from "@/store/auth";
 import { TooltipProvider } from "@/components/ui/tooltip";
 config.autoAddCss = false;
 
+const THEME_BG: Record<string, string> = {
+  dark: "#0f1117",
+  light: "#f0f4fb",
+  diu: "#09100c",
+};
+
 function ThemeApplicator() {
   const theme = useUIStore((s) => s.theme);
 
   useEffect(() => {
     const html = document.documentElement;
     html.setAttribute("data-theme", theme);
+    html.style.background = THEME_BG[theme] ?? THEME_BG.dark;
     if (theme === "light") {
       html.classList.remove("dark");
     } else {
