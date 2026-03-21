@@ -5,7 +5,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faDatabase, faServer, faPlay, faStop, faRotate, faTrash,
   faArrowLeft, faSpinner, faTerminal, faChartBar, faNetworkWired,
-  faCircle,
+  faCircle, faTable,
 } from "@fortawesome/free-solid-svg-icons";
 import { useCluster, useClusterStats, useClusterAction, useDeleteCluster } from "@/hooks/useClusters";
 import Topbar from "@/components/layout/Topbar";
@@ -123,6 +123,15 @@ export default function ClusterDetailPage() {
             </div>
 
             <div className="flex gap-2 flex-wrap">
+              {cluster.status === "running" && cluster.db_type !== "redis" && (
+                <Link
+                  href={`/dashboard/clusters/${cluster.id}/browser`}
+                  className="btn-primary text-sm"
+                >
+                  <FontAwesomeIcon icon={faTable} />
+                  Browse
+                </Link>
+              )}
               {cluster.status === "running" && (
                 <>
                   <button

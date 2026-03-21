@@ -76,3 +76,69 @@ export interface ActionResponse {
   message: string;
   data?: Record<string, unknown>;
 }
+
+// ─── Database Browser ─────────────────────────────────────────────────────────
+
+export interface BrowserDatabase {
+  name: string;
+  size?: string;
+}
+
+export interface BrowserTable {
+  name: string;
+  schema?: string;
+  estimated_rows: number;
+  size?: string;
+}
+
+export interface BrowserColumn {
+  name: string;
+  data_type: string;
+  udt_name?: string;
+  is_nullable: string;
+  column_default: string | null;
+  character_maximum_length?: number | null;
+  numeric_precision?: number | null;
+  numeric_scale?: number | null;
+  ordinal_position: number;
+  is_primary_key: boolean | number;
+  column_key?: string;
+  extra?: string;
+}
+
+export interface BrowserIndex {
+  name?: string;
+  indexname?: string;
+  definition?: string;
+  indexdef?: string;
+  is_primary?: boolean;
+  is_unique?: boolean;
+  // MySQL fields
+  Key_name?: string;
+  Column_name?: string;
+  Non_unique?: number;
+}
+
+export interface BrowserForeignKey {
+  column_name: string;
+  foreign_table: string;
+  foreign_column: string;
+  constraint_name: string;
+}
+
+export interface BrowserStructure {
+  columns: BrowserColumn[];
+  indexes: BrowserIndex[];
+  foreign_keys: BrowserForeignKey[];
+  primary_keys: string[];
+  error?: string;
+}
+
+export interface BrowserData {
+  columns: string[];
+  rows: unknown[][];
+  total: number;
+  page: number;
+  page_size: number;
+  error?: string;
+}

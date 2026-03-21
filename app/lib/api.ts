@@ -102,3 +102,53 @@ export interface ClusterCreatePayload {
   base_port?: number;
   tags?: Record<string, string>;
 }
+
+// ─── Database Browser API ─────────────────────────────────────────────────────
+
+export const browserApi = {
+  listDatabases: (clusterId: string) =>
+    api.get(`/clusters/${clusterId}/browser/databases`).then((r) => r.data),
+
+  listTables: (clusterId: string, database: string) =>
+    api.get(`/clusters/${clusterId}/browser/databases/${encodeURIComponent(database)}/tables`).then((r) => r.data),
+
+  getStructure: (clusterId: string, database: string, table: string, schema = "public") =>
+    api.get(`/clusters/${clusterId}/browser/databases/${encodeURIComponent(database)}/tables/${encodeURIComponent(table)}/structure`, {
+      params: { schema },
+    }).then((r) => r.data),
+
+  getData: (
+    clusterId: string, database: string, table: string,
+    opts: { schema?: string; page?: number; page_size?: number; sort?: string; dir?: string } = {}
+  ) =>
+    api.get(`/clusters/${clusterId}/browser/databases/${encodeURIComponent(database)}/tables/${encodeURIComponent(table)}/data`, {
+      params: { schema: "public", page: 1, page_size: 50, ...opts },
+    }).then((r) => r.data),
+
+  insertRow: (clusterId: string, database: string, table: string, row: Record<string, unknown>, schema = "public") =>
+    api.post(
+      `/clusters/${clusterId}/browser/databases/${encodeURIComponent(database)}/tables/${encodeURIComponent(table)}/data`,
+      { row },
+      { params: { schema } }
+    ).then((r) => r.data),
+
+  updateRow: (
+    clusterId: string, database: string, table: string,
+    pk_column: string, pk_value: string,
+    row: Record<string, unknown>, schema = "public"
+  ) =>
+    api.put(
+      `/clusters/${clusterId}/browser/databases/${encodeURIComponent(database)}/tables/${encodeURIComponent(table)}/data`,
+      { pk_column, pk_value, row },
+      { params: { schema } }
+    ).then((r) => r.data),
+
+  deleteRow: (
+    clusterId: string, database: string, table: string,
+    pk_column: string, pk_value: string, schema = "public"
+  ) =>
+    api.delete(
+      `/clusters/${clusterId}/browser/databases/${encodeURIComponent(database)}/tables/${encodeURIComponent(table)}/data`,
+      { params: { schema, pk_column, pk_value } }
+    ).then((r) => r.data),
+};
