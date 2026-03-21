@@ -205,7 +205,12 @@
   }
 
   .btn-secondary {
-    @apply bg-surface-100 hover:bg-surface-200 border border-surface-border text-slate-200 px-4 py-2 rounded-lg font-medium transition-all duration-150 flex items-center gap-2;
+    @apply bg-surface-100 hover:bg-surface-200 border px-4 py-2 rounded-lg font-medium transition-all duration-150 flex items-center gap-2;
+    border-color: rgb(var(--brand-500) / 0.35);
+    color: var(--text-strong);
+  }
+  .btn-secondary:hover {
+    border-color: rgb(var(--brand-500) / 0.55);
   }
 
   .btn-danger {
@@ -213,7 +218,9 @@
   }
 
   .input {
-    @apply bg-surface-100 border border-surface-border text-slate-200 placeholder-slate-500 rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all duration-150;
+    @apply bg-surface-100 border border-surface-border rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all duration-150;
+    color: var(--text-strong);
+    &::placeholder { color: var(--text-subtle); }
   }
 
   .badge {

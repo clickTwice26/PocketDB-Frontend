@@ -4,6 +4,7 @@ const api = axios.create({
   baseURL: "/api/v1",
   timeout: 30000,
   headers: { "Content-Type": "application/json" },
+  withCredentials: true, // send httpOnly cookie on every request
 });
 
 api.interceptors.response.use(
@@ -16,6 +17,34 @@ api.interceptors.response.use(
 );
 
 export default api;
+
+// ─── Auth API ─────────────────────────────────────────────────────────────────
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface TokenOut {
+  access_token: string;
+  token_type: string;
+  user: AuthUser;
+}
+
+export const authApi = {
+  register: (name: string, email: string, password: string) =>
+    api.post<TokenOut>("/auth/register", { name, email, password }).then((r) => r.data),
+
+  login: (email: string, password: string) =>
+    api.post<TokenOut>("/auth/login", { email, password }).then((r) => r.data),
+
+  logout: () => api.post("/auth/logout").then((r) => r.data),
+
+  me: () => api.get<AuthUser>("/auth/me").then((r) => r.data),
+};
 
 // ─── Cluster API ──────────────────────────────────────────────────────────────
 

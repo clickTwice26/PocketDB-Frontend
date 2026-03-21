@@ -6,6 +6,7 @@ import { useState, useEffect } from "react";
 import { config } from "@fortawesome/fontawesome-svg-core";
 import "@fortawesome/fontawesome-svg-core/styles.css";
 import { useUIStore } from "@/store/ui";
+import { useAuthStore } from "@/store/auth";
 import { TooltipProvider } from "@/components/ui/tooltip";
 config.autoAddCss = false;
 
@@ -15,7 +16,6 @@ function ThemeApplicator() {
   useEffect(() => {
     const html = document.documentElement;
     html.setAttribute("data-theme", theme);
-    // Manage Tailwind's `dark` class — light is the only bright theme
     if (theme === "light") {
       html.classList.remove("dark");
     } else {
@@ -23,6 +23,16 @@ function ThemeApplicator() {
     }
   }, [theme]);
 
+  return null;
+}
+
+/** Bootstraps the auth session on every page load by hitting /auth/me. */
+function AuthBootstrap() {
+  const fetchMe = useAuthStore((s) => s.fetchMe);
+  useEffect(() => {
+    fetchMe();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return null;
 }
 
@@ -43,6 +53,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider delay={400}>
         <ThemeApplicator />
+        <AuthBootstrap />
         {children}
         <Toaster
         position="bottom-right"

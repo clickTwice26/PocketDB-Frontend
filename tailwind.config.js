@@ -10,6 +10,13 @@ module.exports = {
         "2xs": ["0.625rem", { lineHeight: "1rem" }], // 10px — use for micro labels only
       },
       colors: {
+        /* Semantic foreground — adapts to each theme automatically */
+        fg: {
+          strong: "var(--text-strong)",  /* headings, active labels   */
+          base:   "var(--text)",         /* default body text         */
+          muted:  "var(--text-muted)",   /* icons, secondary labels   */
+          subtle: "var(--text-subtle)",  /* captions, version strings */
+        },
         brand: {
           50:  "rgb(var(--brand-50)  / <alpha-value>)",
           100: "rgb(var(--brand-100) / <alpha-value>)",

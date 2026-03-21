@@ -6,7 +6,6 @@ import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
 import {
   faDatabase,
   faLayerGroup,
-  faCircleNodes,
   faCode,
   faCog,
   faChartLine,
@@ -27,7 +26,6 @@ import { cn } from "@/lib/utils";
 const NAV_ITEMS: { href: string; icon: IconDefinition; label: string }[] = [
   { href: "/dashboard/overview",     icon: faChartLine,   label: "Overview"     },
   { href: "/dashboard/clusters",     icon: faLayerGroup,  label: "Clusters"     },
-  { href: "/dashboard/nodes",        icon: faCircleNodes, label: "Nodes"        },
   { href: "/dashboard/query-editor", icon: faCode,        label: "Query Editor" },
   { href: "/dashboard/settings",     icon: faCog,         label: "Settings"     },
 ];
@@ -54,19 +52,18 @@ function NavItem({
       ? "w-10 h-10 justify-center"
       : "gap-3 px-3 py-2.5 w-full",
     active
-      ? "bg-brand-600/20 text-brand-400 border border-brand-600/30"
-      : "text-slate-400 hover:text-white hover:bg-surface-100 border border-transparent"
+      ? "bg-brand-500/15 border border-brand-500/25 text-fg-strong"
+      : "text-fg-muted hover:text-fg-strong hover:bg-surface-100 border border-transparent"
   );
 
-  const iconEl = (
-    <FontAwesomeIcon
-      icon={icon}
-      className={cn(
-        "shrink-0 text-sm",
-        active ? "text-brand-400" : "group-hover:text-white"
-      )}
-    />
+  const iconClass = cn(
+    "shrink-0 text-sm transition-colors duration-150",
+    active
+      ? "text-brand-500"
+      : "text-fg-muted group-hover:text-brand-500"
   );
+
+  const iconEl = <FontAwesomeIcon icon={icon} className={iconClass} />;
 
   if (collapsed) {
     return (
@@ -87,7 +84,12 @@ function NavItem({
   return (
     <Link href={href} onClick={onClick} className={linkClass}>
       {iconEl}
-      <span className="text-sm font-medium truncate">{label}</span>
+      <span className={cn(
+        "text-sm font-medium truncate transition-colors duration-150",
+        active ? "text-fg-strong" : "text-fg-muted group-hover:text-fg-strong"
+      )}>
+        {label}
+      </span>
     </Link>
   );
 }
@@ -101,63 +103,60 @@ function SidebarContent({
   onNavClick?: () => void;
 }) {
   const pathname = usePathname();
-  const { setSidebarOpen } = useUIStore();
+  const { setSidebarOpen, sidebarOpen } = useUIStore();
 
   return (
     <div className="flex flex-col h-full overflow-hidden select-none">
       {/* ── Logo / Brand ── */}
       <div
         className={cn(
-          "flex items-center h-16 border-b border-surface-border shrink-0",
-          collapsed ? "justify-center" : "justify-between px-4"
+          "flex items-center h-14 border-b border-surface-border shrink-0 px-3",
+          collapsed ? "justify-center" : "gap-2.5"
         )}
       >
-        {collapsed ? (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  onClick={() => setSidebarOpen(true)}
-                  aria-label="Expand sidebar"
-                  className="w-9 h-9 rounded-lg bg-brand-600 flex items-center justify-center hover:bg-brand-700 transition-colors focus:outline-none"
-                />
-              }
-            >
-              <FontAwesomeIcon icon={faDatabase} className="text-white text-sm" />
-            </TooltipTrigger>
-            <TooltipContent side="right" sideOffset={10}>
-              Expand sidebar
-            </TooltipContent>
-          </Tooltip>
-        ) : (
-          <>
-            <Link
-              href="/dashboard/overview"
-              onClick={onNavClick}
-              className="flex items-center gap-2.5 min-w-0 group"
-            >
-              <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center shrink-0 group-hover:bg-brand-700 transition-colors">
-                <FontAwesomeIcon icon={faDatabase} className="text-white text-sm" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-bold text-strong tracking-wide leading-none truncate">
-                  PocketDB
-                </p>
-                <p className="text-2xs text-subtle leading-tight mt-0.5">
-                  Database Manager
-                </p>
-              </div>
-            </Link>
-
-            <button
-              onClick={() => setSidebarOpen(false)}
-              aria-label="Collapse sidebar"
-              className="w-7 h-7 shrink-0 ml-2 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-surface-100 transition-colors"
-            >
-              <FontAwesomeIcon icon={faChevronLeft} className="text-xs" />
-            </button>
-          </>
+        <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center shrink-0">
+          <FontAwesomeIcon icon={faDatabase} className="text-white text-sm" />
+        </div>
+        {!collapsed && (
+          <Link
+            href="/dashboard/overview"
+            onClick={onNavClick}
+            className="min-w-0 flex-1 group"
+          >
+            <p className="text-sm font-bold text-fg-strong tracking-wide leading-none truncate group-hover:text-brand-500 transition-colors">
+              PocketDB
+            </p>
+            <p className="text-2xs text-fg-subtle leading-tight mt-0.5">
+              Database Manager
+            </p>
+          </Link>
         )}
+      </div>
+
+      {/* ── Collapse / Expand toggle ── */}
+      <div
+        className={cn(
+          "shrink-0 flex border-b border-surface-border py-1.5",
+          collapsed ? "justify-center px-0" : "px-3"
+        )}
+      >
+        <button
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className={cn(
+            "flex items-center justify-center gap-2 rounded-lg transition-all duration-150",
+            "text-fg-muted hover:text-fg-strong hover:bg-surface-100 border border-transparent hover:border-surface-border",
+            collapsed ? "w-9 h-9" : "w-full px-2.5 py-1.5"
+          )}
+        >
+          <FontAwesomeIcon
+            icon={collapsed ? faChevronRight : faChevronLeft}
+            className="text-xs shrink-0"
+          />
+          {!collapsed && (
+            <span className="text-xs font-medium">Collapse</span>
+          )}
+        </button>
       </div>
 
       {/* ── Navigation ── */}
@@ -168,7 +167,7 @@ function SidebarContent({
         )}
       >
         {!collapsed && (
-          <p className="text-2xs font-semibold text-subtle uppercase tracking-widest px-3 mb-3">
+          <p className="text-2xs font-semibold text-fg-subtle uppercase tracking-widest px-3 mb-3">
             Menu
           </p>
         )}
@@ -197,10 +196,10 @@ function SidebarContent({
           <Tooltip>
             <TooltipTrigger
               render={
-                <div className="w-7 h-7 rounded-full bg-brand-600/15 border border-brand-600/25 flex items-center justify-center cursor-default" />
+                <div className="w-7 h-7 rounded-full bg-brand-500/10 border border-brand-500/20 flex items-center justify-center cursor-default" />
               }
             >
-              <FontAwesomeIcon icon={faDatabase} className="text-brand-400 text-2xs" />
+              <FontAwesomeIcon icon={faDatabase} className="text-brand-500 text-2xs" />
             </TooltipTrigger>
             <TooltipContent side="right" sideOffset={10}>
               PocketDB v1.0.0
@@ -208,8 +207,8 @@ function SidebarContent({
           </Tooltip>
         ) : (
           <div className="flex items-center justify-between">
-            <p className="text-xs text-subtle">PocketDB</p>
-            <span className="text-2xs font-medium text-subtle bg-surface-100 border border-surface-border rounded px-1.5 py-0.5">
+            <p className="text-xs text-fg-subtle">PocketDB</p>
+            <span className="text-2xs font-medium text-fg-subtle bg-surface-100 border border-surface-border rounded px-1.5 py-0.5">
               v1.0.0
             </span>
           </div>

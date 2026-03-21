@@ -1,6 +1,6 @@
 "use client";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faCog, faInfoCircle, faPalette, faCheck, faMoon, faSun, faLeaf } from "@fortawesome/free-solid-svg-icons";
+import { faPalette, faCheck, faMoon, faSun, faLeaf } from "@fortawesome/free-solid-svg-icons";
 import Topbar from "@/components/layout/Topbar";
 import { useUIStore } from "@/store/ui";
 import type { Theme } from "@/store/ui";
@@ -92,65 +92,6 @@ export default function SettingsPage() {
                 </button>
               );
             })}
-          </div>
-        </div>
-
-        {/* About */}
-        <div className="card space-y-3">
-          <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-            <FontAwesomeIcon icon={faInfoCircle} className="text-brand-400" />
-            About PocketDB
-          </h3>
-          <div className="space-y-2 text-sm text-slate-400">
-            <div className="flex justify-between">
-              <span>Version</span>
-              <span className="text-white font-medium">1.0.0</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Stack</span>
-              <span className="text-white font-medium">FastAPI · Next.js · PostgreSQL · Docker</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Frontend</span>
-              <span className="text-white font-medium">Next.js · Tailwind CSS · React Query</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Backend</span>
-              <span className="text-white font-medium">FastAPI · SQLAlchemy · asyncpg</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Environment */}
-        <div className="card space-y-3">
-          <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-            <FontAwesomeIcon icon={faCog} className="text-brand-400" />
-            Environment
-          </h3>
-          <div className="space-y-2 text-sm text-slate-400">
-            <div className="flex justify-between">
-              <span>API URL</span>
-              <code className="text-brand-300 font-mono text-xs">
-                {process.env.NEXT_PUBLIC_API_URL ?? "/api/v1 (proxied)"}
-              </code>
-            </div>
-            <div className="flex justify-between">
-              <span>Docker Socket</span>
-              <code className="text-brand-300 font-mono text-xs">unix:///var/run/docker.sock</code>
-            </div>
-          </div>
-        </div>
-
-        {/* Links */}
-        <div className="card space-y-3">
-          <h3 className="text-sm font-semibold text-white">API Documentation</h3>
-          <div className="flex gap-3">
-            <a href="/api/docs" target="_blank" className="btn-primary text-sm">
-              Swagger UI
-            </a>
-            <a href="/api/redoc" target="_blank" className="btn-secondary text-sm">
-              ReDoc
-            </a>
           </div>
         </div>
 
