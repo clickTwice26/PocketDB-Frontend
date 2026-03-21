@@ -43,7 +43,7 @@ export default function QueryEditorPage() {
     <div className="min-h-full">
       <Topbar title="Query Editor" subtitle="Execute SQL on any running cluster" />
 
-      <div className="p-6 space-y-4">
+      <div className="p-4 md:p-6 space-y-4">
         {/* Cluster picker */}
         <div className="card">
           <div className="flex items-center gap-4 flex-wrap">
@@ -146,7 +146,7 @@ export default function QueryEditorPage() {
                 </div>
               </div>
               <textarea
-                className="w-full bg-[#0d1117] text-slate-300 font-mono text-sm p-4 resize-none focus:outline-none min-h-[180px]"
+                className="w-full bg-surface text-slate-300 font-mono text-sm p-4 resize-none focus:outline-none min-h-[180px]"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => {

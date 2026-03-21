@@ -2,7 +2,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type AccentTheme = "indigo" | "violet" | "sky" | "emerald" | "amber" | "rose";
+export type Theme = "dark" | "light" | "diu";
 
 interface UIStore {
   sidebarOpen: boolean;
@@ -11,8 +11,8 @@ interface UIStore {
   setCreateModalOpen: (v: boolean) => void;
   selectedClusterId: string | null;
   setSelectedClusterId: (id: string | null) => void;
-  accent: AccentTheme;
-  setAccent: (accent: AccentTheme) => void;
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
 }
 
 export const useUIStore = create<UIStore>()(
@@ -24,12 +24,15 @@ export const useUIStore = create<UIStore>()(
       setCreateModalOpen: (v) => set({ createModalOpen: v }),
       selectedClusterId: null,
       setSelectedClusterId: (id) => set({ selectedClusterId: id }),
-      accent: "indigo",
-      setAccent: (accent) => set({ accent }),
+      theme: "dark",
+      setTheme: (theme) => set({ theme }),
     }),
     {
       name: "pocketdb-ui",
-      partialize: (state) => ({ accent: state.accent, sidebarOpen: state.sidebarOpen }),
+      partialize: (state) => ({
+        theme:       state.theme,
+        sidebarOpen: state.sidebarOpen,
+      }),
     }
   )
 );

@@ -102,7 +102,7 @@ export default function ClusterDetailPage() {
     <div className="min-h-full">
       <Topbar title={cluster.name} subtitle={`${(cluster.db_type ?? "postgres").toUpperCase()} ${cluster.db_version}`} />
 
-      <div className="p-6 space-y-5">
+      <div className="p-4 md:p-6 space-y-5">
         {/* Breadcrumb */}
         <Link
           href="/dashboard/clusters"
@@ -195,7 +195,8 @@ export default function ClusterDetailPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 bg-surface-50 border border-surface-border rounded-xl p-1 w-fit">
+        <div className="flex gap-1 bg-surface-50 border border-surface-border rounded-xl p-1 overflow-x-auto">
+          <div className="flex gap-1 min-w-max">
           {[
             { id: "nodes", icon: faServer, label: "Nodes" },
             { id: "stats", icon: faChartBar, label: "Stats" },
@@ -215,6 +216,7 @@ export default function ClusterDetailPage() {
               {tab.label}
             </button>
           ))}
+          </div>
         </div>
 
         {/* Nodes Tab */}

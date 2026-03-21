@@ -107,7 +107,7 @@ export default function CreateClusterModal() {
       />
 
       {/* Modal */}
-      <div className="relative bg-surface-50 border border-surface-border rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col animate-slide-up">
+      <div className="relative bg-surface-50 border border-surface-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col animate-slide-up">
         {/* Header */}
         <div className={clsx("px-6 py-5 border-b border-surface-border", selectedEngine.bg)}>
           <div className="flex items-center justify-between">
@@ -128,7 +128,7 @@ export default function CreateClusterModal() {
         </div>
 
         {/* Body */}
-        <div className="px-6 py-6 space-y-6">
+        <div className="px-6 py-6 space-y-6 overflow-y-auto flex-1">
           {/* Engine selector */}
           <div>
             <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Choose Engine</p>
@@ -240,7 +240,7 @@ export default function CreateClusterModal() {
               { label: "Memory", value: "128 MB" },
             ].map((item) => (
               <div key={item.label} className="flex-1 bg-surface-100 rounded-lg px-2 py-2 text-center">
-                <p className="text-slate-500 text-[10px] uppercase tracking-wide">{item.label}</p>
+                <p className="text-subtle text-2xs uppercase tracking-wide">{item.label}</p>
                 <p className="text-white font-semibold mt-0.5">{item.value}</p>
               </div>
             ))}

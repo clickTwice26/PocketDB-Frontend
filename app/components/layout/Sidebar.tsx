@@ -47,17 +47,28 @@ export default function Sidebar() {
   const pathname = usePathname();
   const { sidebarOpen, setSidebarOpen } = useUIStore();
 
+  const handleNavClick = () => {
+    if (typeof window !== "undefined" && window.innerWidth < 768) {
+      setSidebarOpen(false);
+    }
+  };
+
   return (
     <aside
       className={clsx(
-        "h-screen bg-surface-50 border-r border-surface-border flex flex-col transition-all duration-300 shrink-0",
-        sidebarOpen ? "w-64" : "w-16"
+        // Base: always fixed on mobile (overlay drawer), relative on md+
+        "fixed inset-y-0 left-0 z-50 h-screen w-64 flex flex-col bg-surface-50 border-r border-surface-border transition-all duration-300",
+        // Mobile: slide in/out with translate
+        sidebarOpen ? "translate-x-0" : "-translate-x-full",
+        // Desktop md+: static in-flow flex item, translate reset, dynamic width
+        "md:relative md:translate-x-0 md:shrink-0",
+        sidebarOpen ? "md:w-64" : "md:w-16"
       )}
     >
       {/* Logo */}
       <div className="flex items-center justify-between px-4 h-16 border-b border-surface-border">
         {sidebarOpen && (
-          <Link href="/dashboard/overview" className="flex items-center gap-2.5">
+          <Link href="/dashboard/overview" onClick={handleNavClick} className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center">
               <FontAwesomeIcon icon={faDatabase} className="text-white text-sm" />
             </div>
@@ -89,6 +100,7 @@ export default function Sidebar() {
             <Link
               key={item.href}
               href={item.href}
+              onClick={handleNavClick}
               className={clsx(
                 "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-150 group",
                 active
@@ -126,7 +138,7 @@ export default function Sidebar() {
       {/* Version */}
       {sidebarOpen && (
         <div className="p-4 border-t border-surface-border">
-          <p className="text-xs text-slate-600">v1.0.0</p>
+          <p className="text-xs text-subtle">v1.0.0</p>
         </div>
       )}
     </aside>

@@ -9,10 +9,19 @@ import { useUIStore } from "@/store/ui";
 config.autoAddCss = false;
 
 function ThemeApplicator() {
-  const accent = useUIStore((s) => s.accent);
+  const theme = useUIStore((s) => s.theme);
+
   useEffect(() => {
-    document.documentElement.setAttribute("data-accent", accent);
-  }, [accent]);
+    const html = document.documentElement;
+    html.setAttribute("data-theme", theme);
+    // Manage Tailwind's `dark` class — light is the only bright theme
+    if (theme === "light") {
+      html.classList.remove("dark");
+    } else {
+      html.classList.add("dark");
+    }
+  }, [theme]);
+
   return null;
 }
 

@@ -28,7 +28,7 @@ export default function NodesPage() {
         subtitle={`${allNodes.length} total nodes across ${clusters.length} clusters`}
       />
 
-      <div className="p-6">
+      <div className="p-4 md:p-6">
         {isLoading ? (
           <div className="text-center text-slate-400 py-16">Loading nodes...</div>
         ) : allNodes.length === 0 ? (
@@ -37,7 +37,7 @@ export default function NodesPage() {
             <p className="text-slate-400">No nodes found. Create a cluster first.</p>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-surface-border">
+          <div className="overflow-x-auto rounded-xl border border-surface-border">
             <table className="w-full text-sm">
               <thead className="bg-surface-50 border-b border-surface-border">
                 <tr>

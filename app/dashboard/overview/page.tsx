@@ -36,18 +36,18 @@ export default function OverviewPage() {
     <div className="min-h-full">
       <Topbar title="Overview" subtitle="PocketDB" />
 
-      <div className="p-6 space-y-6">
+      <div className="p-4 md:p-6 space-y-4 md:space-y-6">
         {/* Hero */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-brand-900/80 via-surface-50 to-surface-50 border border-brand-500/20 p-6">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-brand-900/80 via-surface-50 to-surface-50 border border-brand-500/20 p-5 md:p-6">
           <div className="absolute inset-0 bg-hero-glow opacity-60 pointer-events-none" />
           <div className="relative">
             <p className="text-xs font-semibold text-brand-400 uppercase tracking-widest mb-2">
               Database Infrastructure
             </p>
-            <h2 className="text-2xl font-bold text-white mb-1">
+            <h2 className="text-xl md:text-2xl font-bold text-white mb-1">
               Manage your database clusters
             </h2>
-            <p className="text-sm text-slate-400 mb-4">
+            <p className="text-sm text-slate-400 mb-4 hidden sm:block">
               Spin up, monitor, and manage Docker-powered PostgreSQL, MySQL, and Redis clusters with ease.
             </p>
             <button onClick={() => setCreateModalOpen(true)} className="btn-primary">
@@ -55,7 +55,7 @@ export default function OverviewPage() {
               Create New Cluster
             </button>
           </div>
-          <div className="absolute right-6 top-4 opacity-10">
+          <div className="absolute right-6 top-4 opacity-10 hidden sm:block">
             <FontAwesomeIcon icon={faDatabase} className="text-[120px] text-brand-400" />
           </div>
         </div>
@@ -63,17 +63,19 @@ export default function OverviewPage() {
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { label: "Total Clusters", value: stats.total, icon: faLayerGroup, color: "text-brand-400", bg: "bg-brand-500/10 border-brand-500/20" },
-            { label: "Running", value: stats.running, icon: faCircleCheck, color: "text-green-400", bg: "bg-green-500/10 border-green-500/20" },
-            { label: "Stopped", value: stats.stopped, icon: faDatabase, color: "text-slate-400", bg: "bg-slate-500/10 border-slate-500/20" },
-            { label: "Total Nodes", value: stats.totalNodes, icon: faServer, color: "text-purple-400", bg: "bg-purple-500/10 border-purple-500/20" },
+            { label: "Total Clusters", value: stats.total,      icon: faLayerGroup,   iconColor: "text-brand-400",  iconBg: "bg-brand-500/15",  cardBorder: "border-brand-500/20"  },
+            { label: "Running",        value: stats.running,    icon: faCircleCheck,  iconColor: "text-green-400",  iconBg: "bg-green-500/15",  cardBorder: "border-green-500/20"  },
+            { label: "Stopped",        value: stats.stopped,    icon: faDatabase,     iconColor: "text-slate-400",  iconBg: "bg-slate-500/15",  cardBorder: "border-slate-500/20"  },
+            { label: "Total Nodes",    value: stats.totalNodes, icon: faServer,       iconColor: "text-purple-400", iconBg: "bg-purple-500/15", cardBorder: "border-purple-500/20" },
           ].map((s) => (
-            <div key={s.label} className={clsx("stat-card border", s.bg)}>
-              <div className={clsx("w-10 h-10 rounded-xl flex items-center justify-center", s.bg)}>
-                <FontAwesomeIcon icon={s.icon} className={clsx("text-lg", s.color)} />
+            <div key={s.label} className={clsx("bg-surface-50 rounded-xl p-5 border flex flex-col gap-3 transition-all duration-200 hover:shadow-lg hover:shadow-black/20", s.cardBorder)}>
+              <div className={clsx("w-10 h-10 rounded-xl flex items-center justify-center", s.iconBg)}>
+                <FontAwesomeIcon icon={s.icon} className={clsx("text-base", s.iconColor)} />
               </div>
-              <p className="text-2xl font-bold text-white">{isLoading ? "—" : s.value}</p>
-              <p className="text-xs text-slate-400">{s.label}</p>
+              <div>
+                <p className="text-2xl font-bold text-white leading-none">{isLoading ? "—" : s.value}</p>
+                <p className="text-xs text-slate-400 mt-1">{s.label}</p>
+              </div>
             </div>
           ))}
         </div>
@@ -129,7 +131,7 @@ export default function OverviewPage() {
                 <Link
                   key={c.id}
                   href={`/dashboard/clusters/${c.id}`}
-                  className="flex items-center gap-4 p-4 bg-surface-50 rounded-xl border border-surface-border hover:border-brand-500/30 transition-all group"
+                  className="flex items-center gap-3 p-3 md:p-4 bg-surface-50 rounded-xl border border-surface-border hover:border-brand-500/30 transition-all group"
                 >
                   <div className="w-8 h-8 rounded-lg bg-brand-600/20 border border-brand-500/20 flex items-center justify-center shrink-0">
                     <FontAwesomeIcon icon={faDatabase} className="text-brand-400 text-xs" />
@@ -140,11 +142,11 @@ export default function OverviewPage() {
                       {c.node_count} node{c.node_count !== 1 ? "s" : ""} · {(c.db_type ?? "PG").toUpperCase()} {c.db_version}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 shrink-0">
                     <span className={clsx("w-2 h-2 rounded-full", STATUS_DOT[c.status] ?? "bg-slate-500")} />
                     <span className="text-xs text-slate-400 capitalize">{c.status}</span>
                   </div>
-                  <span className="text-xs text-slate-500">
+                  <span className="hidden sm:block text-xs text-slate-500 shrink-0">
                     {formatDistanceToNow(new Date(c.created_at), { addSuffix: true })}
                   </span>
                 </Link>

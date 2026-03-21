@@ -140,7 +140,7 @@ export default function ClusterCard({ cluster }: Props) {
         <div className="bg-surface-100 rounded-lg p-2.5 text-center">
           <FontAwesomeIcon icon={faNetworkWired} className="text-cyan-400 text-xs mb-1" />
           <p className="text-xs text-slate-400">Type</p>
-          <p className="text-[10px] font-semibold text-white leading-tight">
+          <p className="text-2xs font-semibold text-white leading-tight">
             {TYPE_LABELS[cluster.cluster_type] ?? cluster.cluster_type}
           </p>
         </div>
@@ -164,7 +164,7 @@ export default function ClusterCard({ cluster }: Props) {
 
       {/* Footer */}
       <div className="flex items-center justify-between pt-3 border-t border-surface-border">
-        <p className="text-[11px] text-slate-500">
+        <p className="text-xs text-slate-500">
           {formatDistanceToNow(new Date(cluster.created_at), { addSuffix: true })}
         </p>
         <Link

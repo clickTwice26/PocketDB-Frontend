@@ -6,6 +6,9 @@ module.exports = {
   ],
   theme: {
     extend: {
+      fontSize: {
+        "2xs": ["0.625rem", { lineHeight: "1rem" }], // 10px — use for micro labels only
+      },
       colors: {
         brand: {
           50:  "rgb(var(--brand-50)  / <alpha-value>)",
@@ -21,11 +24,11 @@ module.exports = {
           950: "rgb(var(--brand-950) / <alpha-value>)",
         },
         surface: {
-          DEFAULT: "#0f1117",
-          50:  "#1a1d27",
-          100: "#22263a",
-          200: "#2d3148",
-          border: "#2d3148",
+          DEFAULT: "rgb(var(--surface-default) / <alpha-value>)",
+          50:      "rgb(var(--surface-50)      / <alpha-value>)",
+          100:     "rgb(var(--surface-100)     / <alpha-value>)",
+          200:     "rgb(var(--surface-200)     / <alpha-value>)",
+          border:  "rgb(var(--surface-border)  / <alpha-value>)",
         },
       },
       fontFamily: {
