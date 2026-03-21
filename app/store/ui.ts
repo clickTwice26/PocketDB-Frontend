@@ -7,6 +7,8 @@ export type Theme = "dark" | "light" | "diu";
 interface UIStore {
   sidebarOpen: boolean;
   setSidebarOpen: (v: boolean) => void;
+  mobileNavOpen: boolean;
+  setMobileNavOpen: (v: boolean) => void;
   createModalOpen: boolean;
   setCreateModalOpen: (v: boolean) => void;
   selectedClusterId: string | null;
@@ -20,6 +22,8 @@ export const useUIStore = create<UIStore>()(
     (set) => ({
       sidebarOpen: true,
       setSidebarOpen: (v) => set({ sidebarOpen: v }),
+      mobileNavOpen: false,
+      setMobileNavOpen: (v) => set({ mobileNavOpen: v }),
       createModalOpen: false,
       setCreateModalOpen: (v) => set({ createModalOpen: v }),
       selectedClusterId: null,
@@ -32,6 +36,7 @@ export const useUIStore = create<UIStore>()(
       partialize: (state) => ({
         theme:       state.theme,
         sidebarOpen: state.sidebarOpen,
+        // mobileNavOpen intentionally not persisted — always starts closed
       }),
     }
   )

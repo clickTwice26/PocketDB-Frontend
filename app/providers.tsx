@@ -6,6 +6,7 @@ import { useState, useEffect } from "react";
 import { config } from "@fortawesome/fontawesome-svg-core";
 import "@fortawesome/fontawesome-svg-core/styles.css";
 import { useUIStore } from "@/store/ui";
+import { TooltipProvider } from "@/components/ui/tooltip";
 config.autoAddCss = false;
 
 function ThemeApplicator() {
@@ -40,9 +41,10 @@ export default function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeApplicator />
-      {children}
-      <Toaster
+      <TooltipProvider delay={400}>
+        <ThemeApplicator />
+        {children}
+        <Toaster
         position="bottom-right"
         toastOptions={{
           style: {
@@ -58,6 +60,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
         }}
       />
       <ReactQueryDevtools initialIsOpen={false} />
+      </TooltipProvider>
     </QueryClientProvider>
   );
 }
