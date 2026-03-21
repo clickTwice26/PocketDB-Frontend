@@ -1,6 +1,6 @@
 "use client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { clusterApi, type ClusterCreatePayload } from "@/lib/api";
+import { clusterApi, browserApi, type ClusterCreatePayload } from "@/lib/api";
 import toast from "react-hot-toast";
 
 export const clusterKeys = {
@@ -9,6 +9,7 @@ export const clusterKeys = {
   detail: (id: string) => [...clusterKeys.all, "detail", id] as const,
   stats: (id: string) => [...clusterKeys.all, "stats", id] as const,
   health: (id: string) => [...clusterKeys.all, "health", id] as const,
+  databases: (id: string) => [...clusterKeys.detail(id), "databases"] as const,
 };
 
 export function useClusters(status?: string) {
@@ -43,6 +44,18 @@ export function useClusterHealth(id: string) {
     queryFn: () => clusterApi.health(id),
     enabled: !!id,
     refetchInterval: 10000,
+  });
+}
+
+export function useDatabases(clusterId: string) {
+  return useQuery<{ name: string; size?: string }[]>({
+    queryKey: clusterKeys.databases(clusterId),
+    queryFn: () =>
+      browserApi.listDatabases(clusterId).then((res) =>
+        Array.isArray(res) ? res : (res?.databases ?? [])
+      ),
+    enabled: !!clusterId,
+    staleTime: 30_000,
   });
 }
 
