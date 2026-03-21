@@ -146,7 +146,7 @@ export default function CreateClusterModal() {
 
           {/* Engine selector */}
           <div>
-            <p className="text-[11px] font-semibold text-fg-subtle uppercase tracking-widest mb-3">
+            <p className="text-xs font-semibold text-fg-subtle uppercase tracking-widest mb-3">
               Choose Engine
             </p>
             <div className="grid grid-cols-3 gap-2">
@@ -167,7 +167,7 @@ export default function CreateClusterModal() {
                     {/* Active check badge */}
                     {isActive && (
                       <span className={cn(
-                        "absolute top-2 right-2 w-4 h-4 rounded-full flex items-center justify-center text-[9px] text-white",
+                        "absolute top-2 right-2 w-4 h-4 rounded-full flex items-center justify-center text-xs text-white",
                         eng.iconColor.replace("text-", "bg-")
                       )}>
                         <FontAwesomeIcon icon={faCheck} />
@@ -193,7 +193,7 @@ export default function CreateClusterModal() {
 
           {/* Cluster name */}
           <div>
-            <label className="flex items-center gap-1.5 text-[11px] font-semibold text-fg-subtle uppercase tracking-widest mb-2">
+            <label className="flex items-center gap-1.5 text-xs font-semibold text-fg-subtle uppercase tracking-widest mb-2">
               <FontAwesomeIcon icon={faDatabase} />
               Cluster Name
             </label>
@@ -205,14 +205,14 @@ export default function CreateClusterModal() {
               onKeyDown={(e) => e.key === "Enter" && canSubmit && handleSubmit()}
               autoFocus
             />
-            <p className="text-[11px] text-fg-subtle mt-1.5">
+            <p className="text-xs text-fg-subtle mt-1.5">
               Letters, numbers, underscores and hyphens only.
             </p>
           </div>
 
           {/* Password */}
           <div>
-            <label className="flex items-center gap-1.5 text-[11px] font-semibold text-fg-subtle uppercase tracking-widest mb-2">
+            <label className="flex items-center gap-1.5 text-xs font-semibold text-fg-subtle uppercase tracking-widest mb-2">
               <FontAwesomeIcon icon={faKey} />
               Password
               {isRedis && (
@@ -238,7 +238,7 @@ export default function CreateClusterModal() {
               </button>
             </div>
             {!isRedis && form.db_password.length > 0 && form.db_password.length < 8 && (
-              <p className="text-[11px] text-red-500 mt-1.5">At least 8 characters required.</p>
+              <p className="text-xs text-red-500 mt-1.5">At least 8 characters required.</p>
             )}
           </div>
 
@@ -251,8 +251,8 @@ export default function CreateClusterModal() {
               { icon: faLayerGroup,   label: "Memory",  value: "128 MB" },
             ].map((item) => (
               <div key={item.label} className="bg-surface-100 border border-surface-border rounded-xl px-2 py-2.5 text-center">
-                <FontAwesomeIcon icon={item.icon} className="text-[10px] text-fg-subtle mb-1" />
-                <p className="text-[10px] text-fg-subtle uppercase tracking-wide leading-none mb-1">{item.label}</p>
+                <FontAwesomeIcon icon={item.icon} className="text-xs text-fg-subtle mb-1" />
+                <p className="text-xs text-fg-subtle uppercase tracking-wide leading-none mb-1">{item.label}</p>
                 <p className="text-xs font-bold text-fg-strong">{item.value}</p>
               </div>
             ))}

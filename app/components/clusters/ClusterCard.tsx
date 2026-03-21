@@ -155,7 +155,7 @@ export default function ClusterCard({ cluster }: Props) {
       {cluster.tags && Object.keys(cluster.tags).length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-3">
           {Object.entries(cluster.tags).slice(0, 3).map(([k, v]) => (
-            <span key={k} className="px-2 py-0.5 rounded-md bg-brand-600/10 border border-brand-600/20 text-[10px] text-brand-300">
+            <span key={k} className="px-2 py-0.5 rounded-md bg-brand-600/10 border border-brand-600/20 text-xs text-brand-300">
               {k}: {v}
             </span>
           ))}

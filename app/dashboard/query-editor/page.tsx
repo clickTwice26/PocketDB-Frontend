@@ -7,9 +7,9 @@ import {
   faLayerGroup, faBolt, faLightbulb, faClockRotateLeft,
   faExpand, faCompress, faWandMagicSparkles, faArrowUp,
   faStop, faArrowRight, faRotateRight, faRobot,
-  faChevronDown, faMagnifyingGlass,
+  faChevronDown, faMagnifyingGlass, faXmark,
 } from "@fortawesome/free-solid-svg-icons";
-import { useClusters, useExecuteQuery, useDatabases } from "@/hooks/useClusters";
+import { useClusters, useExecuteQuery, useDatabases, useSchemaContext } from "@/hooks/useClusters";
 import Topbar from "@/components/layout/Topbar";
 import { useUIStore } from "@/store/ui";
 import { cn } from "@/lib/utils";
@@ -73,7 +73,7 @@ function RedisOutput({ result }: { result: QueryResult }) {
 
   if (isMap) {
     return (
-      <div className="p-5 font-mono text-sm space-y-1">
+      <div className="p-5 font-mono text-base space-y-1">
         {result.rows.map((row, i) => (
           <div key={i} className="flex gap-4 min-w-0">
             <span className="text-brand-400 shrink-0 w-44 truncate">{String(row[0])}</span>
@@ -85,7 +85,7 @@ function RedisOutput({ result }: { result: QueryResult }) {
   }
   if (isList) {
     return (
-      <div className="p-5 font-mono text-sm space-y-0.5">
+      <div className="p-5 font-mono text-base space-y-0.5">
         {result.rows.map((row, i) => (
           <div key={i} className="flex gap-3">
             <span className="text-fg-subtle select-none w-7 text-right shrink-0 tabular-nums">{i + 1})</span>
@@ -97,7 +97,7 @@ function RedisOutput({ result }: { result: QueryResult }) {
   }
   const val = result.rows[0]?.[0];
   return (
-    <div className="p-5 font-mono text-sm">
+    <div className="p-5 font-mono text-base">
       <span className={val === "(nil)" ? "text-fg-subtle italic" : "text-green-400"}>
         {String(val ?? "(empty)")}
       </span>
@@ -119,7 +119,7 @@ function SqlTable({ result }: { result: QueryResult }) {
     );
   }
   return (
-    <table className="w-full text-xs border-collapse">
+    <table className="w-full text-sm border-collapse">
       <thead className="sticky top-0 z-10 bg-surface-100">
         <tr>
           {result.columns.map((col) => (
@@ -148,185 +148,304 @@ function SqlTable({ result }: { result: QueryResult }) {
 
 // ─── AI Assistant Panel ───────────────────────────────────────────────────────
 
-const SQL_PROMPT_EXAMPLES = [
-  "Show all tables with their row counts",
-  "Find duplicate emails in users",
-  "Get the 10 most recent orders with their total value",
-  "Create an index on the email column",
-  "Show slow queries running over 1 second",
-];
+type MessagePart =
+  | { type: "text"; content: string }
+  | { type: "sql"; content: string };
+
+interface AIChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  streaming?: boolean;
+}
+
+function parseMessageParts(text: string): MessagePart[] {
+  const parts: MessagePart[] = [];
+  const regex = /```(?:sql|mysql|postgresql|postgres|redis|pgsql|SQL|Redis)?\n?([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    const before = text.slice(lastIndex, match.index).trim();
+    if (before) parts.push({ type: "text", content: before });
+    parts.push({ type: "sql", content: match[1].trim() });
+    lastIndex = match.index + match[0].length;
+  }
+  const tail = text.slice(lastIndex).trim();
+  if (tail) parts.push({ type: "text", content: tail });
+  return parts.length ? parts : [{ type: "text", content: text }];
+}
 
 function AIAssistPanel({
   dbType,
   dbVersion,
   clusterId,
+  clusterName,
+  database,
   onUseSQL,
 }: {
   dbType: string;
   dbVersion: string;
   clusterId: string;
+  clusterName: string;
+  database: string;
   onUseSQL: (sql: string) => void;
 }) {
-  const [prompt, setPrompt]       = useState("");
-  const [response, setResponse]   = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [messages, setMessages] = useState<AIChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
-  const [schemaCtx, setSchemaCtx] = useState("");
-  const [showCtx, setShowCtx]     = useState(false);
+  const [copiedIdx, setCopiedIdx] = useState<string | null>(null);
   const abortRef = useRef<{ abort: boolean }>({ abort: false });
-  const responseRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll while streaming
+  const { data: schemaData, isLoading: schemaLoading } = useSchemaContext(clusterId, database);
+  const schemaText = schemaData?.schema_text ?? "";
+  const tableCount = schemaData?.table_count ?? 0;
+
+  const isRedis = dbType === "redis";
+
+  // Auto-scroll when messages change
   useEffect(() => {
-    if (streaming && responseRef.current) {
-      responseRef.current.scrollTop = responseRef.current.scrollHeight;
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [response, streaming]);
+  }, [messages]);
+
+  // Reset chat when cluster or database changes
+  useEffect(() => {
+    setMessages([]);
+  }, [clusterId, database]);
 
   const handleGenerate = useCallback(async () => {
-    if (!prompt.trim() || !clusterId) return;
-    setResponse("");
+    if (!prompt.trim() || !clusterId || streaming) return;
+    const userMsg = prompt.trim();
+    setPrompt("");
+
+    // Build history for API — exclude streaming placeholder
+    const history = messages.filter((m) => !m.streaming);
+    const apiMessages = [
+      ...history.map((m) => ({
+        role: (m.role === "assistant" ? "model" : "user") as "user" | "model",
+        content: m.content,
+      })),
+      { role: "user" as const, content: userMsg },
+    ];
+
+    setMessages((prev) => [
+      ...prev.filter((m) => !m.streaming),
+      { role: "user", content: userMsg },
+      { role: "assistant", content: "", streaming: true },
+    ]);
     setStreaming(true);
     abortRef.current.abort = false;
 
     try {
-      const stream = aiApi.sqlAssistStream({
-        prompt,
+      const stream = aiApi.chatStream({
+        messages: apiMessages,
         clusterId,
         dbType,
         dbVersion,
-        schemaContext: schemaCtx,
+        clusterName,
+        schemaContext: schemaText,
       });
       for await (const chunk of stream) {
         if (abortRef.current.abort) break;
-        setResponse((prev) => prev + chunk);
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last?.streaming) {
+            return [...prev.slice(0, -1), { ...last, content: last.content + chunk }];
+          }
+          return prev;
+        });
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "AI request failed";
       toast.error(msg);
-      setResponse(`-- Error: ${msg}`);
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.streaming) {
+          return [...prev.slice(0, -1), { role: "assistant", content: `⚠️ Error: ${msg}` }];
+        }
+        return prev;
+      });
     } finally {
       setStreaming(false);
+      setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)));
     }
-  }, [prompt, clusterId, dbType, dbVersion, schemaCtx]);
+  }, [prompt, clusterId, dbType, dbVersion, clusterName, schemaText, messages, streaming]);
 
   const handleStop = () => { abortRef.current.abort = true; };
 
-  const handleUse = () => {
-    if (!response) return;
-    // Strip any leading/trailing markdown fences if present
-    const cleaned = response
-      .replace(/^```[\w]*\n?/, "")
-      .replace(/\n?```$/, "")
-      .trim();
-    onUseSQL(cleaned);
+  const handleCopy = (text: string, key: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedIdx(key);
+    setTimeout(() => setCopiedIdx(null), 2000);
   };
 
-  const handleCopyResponse = () => {
-    navigator.clipboard.writeText(response);
-    toast.success("Copied");
-  };
+  const examplePrompts = isRedis
+    ? ["Get all keys and their values", "Show memory usage stats"]
+    : [
+        "Show all tables with row counts",
+        "Find duplicate records in any table",
+        "Write a query joining related tables",
+        "Create an index to optimize queries",
+      ];
 
-  const isRedis = dbType === "redis";
-  const placeholder = isRedis
-    ? "e.g. Get all keys matching 'user:*' and their TTLs"
-    : "e.g. Show me the 10 users who placed the most orders last month";
+  const renderMessage = (msg: AIChatMessage, idx: number) => {
+    if (msg.role === "user") {
+      return (
+        <div key={idx} className="flex justify-end mb-3">
+          <div className="max-w-[88%] bg-brand-600/20 border border-brand-500/30 rounded-2xl rounded-tr-sm px-3 py-2">
+            <p className="text-xs text-fg-base whitespace-pre-wrap break-words">{msg.content}</p>
+          </div>
+        </div>
+      );
+    }
+    // While streaming, render raw content to avoid partial-fence glitches
+    const parts = msg.streaming
+      ? [{ type: "text" as const, content: msg.content }]
+      : parseMessageParts(msg.content);
+
+    return (
+      <div key={idx} className="mb-4">
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <div className="w-5 h-5 rounded bg-brand-600/20 flex items-center justify-center shrink-0">
+            <FontAwesomeIcon icon={faRobot} className="text-brand-400" style={{ fontSize: "9px" }} />
+          </div>
+          <span className="text-2xs text-brand-400 font-semibold">PocketDB AI</span>
+        </div>
+        <div className="space-y-2 pl-6">
+          {parts.map((part, pi) => {
+            if (part.type === "text") {
+              return (
+                <p key={pi} className="text-xs text-fg-muted leading-relaxed whitespace-pre-wrap break-words">
+                  {part.content}
+                  {msg.streaming && pi === parts.length - 1 && (
+                    <span className="inline-block w-1.5 h-3 bg-brand-400 animate-pulse ml-0.5 align-text-bottom" />
+                  )}
+                </p>
+              );
+            }
+            const copyKey = `${idx}-${pi}`;
+            return (
+              <div key={pi} className="rounded-xl border border-surface-border bg-[#0d1117] overflow-hidden">
+                {/* Code block header */}
+                <div className="flex items-center justify-between px-3 py-1.5 border-b border-surface-border/50 bg-[#161b22]">
+                  <span className="text-2xs text-fg-subtle font-mono uppercase tracking-wide">
+                    {isRedis ? "redis" : "sql"}
+                  </span>
+                  <button
+                    onClick={() => handleCopy(part.content, copyKey)}
+                    className="flex items-center gap-1 text-2xs text-fg-subtle hover:text-fg-base transition-colors px-1.5 py-0.5 rounded hover:bg-white/5"
+                  >
+                    <FontAwesomeIcon icon={copiedIdx === copyKey ? faCheck : faCopy} className={cn("text-xs", copiedIdx === copyKey && "text-green-400")} />
+                    {copiedIdx === copyKey ? "Copied" : "Copy"}
+                  </button>
+                </div>
+                {/* Code */}
+                <pre className="px-4 py-3 text-xs font-mono text-green-300 overflow-x-auto whitespace-pre leading-relaxed">
+                  {part.content}
+                </pre>
+                {/* Use in Editor button */}
+                <div className="px-3 py-2 border-t border-surface-border/50 bg-[#161b22]">
+                  <button
+                    onClick={() => { onUseSQL(part.content); toast.success("Inserted into editor"); }}
+                    className="btn-primary text-xs py-1.5 px-3 w-full flex items-center justify-center gap-1.5"
+                  >
+                    <FontAwesomeIcon icon={faArrowRight} className="text-xs" />
+                    Use in Editor
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Header */}
-      <div className="shrink-0 px-3 pt-3 pb-2">
-        <div className="flex items-center gap-2 mb-2">
-          <div className="w-6 h-6 rounded-md bg-brand-600/20 flex items-center justify-center">
-            <FontAwesomeIcon icon={faRobot} className="text-brand-400 text-[11px]" />
-          </div>
-          <span className="text-xs font-semibold text-fg-base">AI SQL Assistant</span>
-          <span className="ml-auto text-[10px] text-brand-400 bg-brand-500/10 px-1.5 py-0.5 rounded font-medium">
-            Gemini
+      {/* Schema status bar */}
+      <div className="shrink-0 px-3 py-1.5 border-b border-surface-border bg-surface-50/60 flex items-center gap-2">
+        {!clusterId ? (
+          <span className="text-2xs text-fg-subtle">No cluster selected</span>
+        ) : isRedis ? (
+          <span className="text-2xs text-red-400 flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-400 inline-block" />
+            Redis connected
           </span>
-        </div>
-        <p className="text-[10px] text-fg-subtle leading-relaxed">
-          Describe what you want in plain English. AI will generate the {isRedis ? "Redis command" : "SQL query"}.
-        </p>
-      </div>
-
-      {/* Prompt examples */}
-      {!response && !streaming && (
-        <div className="shrink-0 px-2 pb-2 flex flex-col gap-0.5">
-          {SQL_PROMPT_EXAMPLES.slice(0, isRedis ? 2 : 4).map((ex) => (
-            <button
-              key={ex}
-              onClick={() => setPrompt(ex)}
-              className="w-full text-left text-[10px] text-fg-subtle hover:text-fg-base px-2 py-1.5 rounded-lg hover:bg-surface-100 transition-colors truncate"
-            >
-              <FontAwesomeIcon icon={faArrowRight} className="mr-1.5 text-brand-400 text-[9px]" />
-              {ex}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Response area */}
-      {(response || streaming) && (
-        <div
-          ref={responseRef}
-          className="flex-1 overflow-y-auto mx-2 mb-2 min-h-0 rounded-xl bg-surface-100 border border-surface-border p-3"
-        >
-          <pre className="text-[11px] text-fg-base font-mono whitespace-pre-wrap break-words leading-relaxed">
-            {response}
-            {streaming && <span className="inline-block w-1.5 h-3 bg-brand-400 animate-pulse ml-0.5 align-text-bottom" />}
-          </pre>
-        </div>
-      )}
-
-      {/* Response actions */}
-      {response && !streaming && (
-        <div className="shrink-0 flex gap-1.5 px-2 pb-2">
-          <button
-            onClick={handleUse}
-            className="btn-primary text-[11px] py-1.5 px-2.5 flex-1"
-          >
-            <FontAwesomeIcon icon={faArrowRight} className="text-[10px]" />
-            Use in Editor
-          </button>
-          <button
-            onClick={handleCopyResponse}
-            className="btn-secondary text-[11px] py-1.5 px-2"
-            title="Copy"
-          >
-            <FontAwesomeIcon icon={faCopy} className="text-[10px]" />
-          </button>
-          <button
-            onClick={() => { setResponse(""); setPrompt(""); }}
-            className="btn-secondary text-[11px] py-1.5 px-2"
-            title="Clear"
-          >
-            <FontAwesomeIcon icon={faRotateRight} className="text-[10px]" />
-          </button>
-        </div>
-      )}
-
-      {/* Optional schema context */}
-      <div className="shrink-0 px-2 pb-1">
-        <button
-          onClick={() => setShowCtx((v) => !v)}
-          className="text-[10px] text-fg-subtle hover:text-fg-base transition-colors flex items-center gap-1"
-        >
-          <FontAwesomeIcon icon={faDatabase} className="text-[9px]" />
-          {showCtx ? "Hide" : "Add"} schema context (optional)
-        </button>
-        {showCtx && (
-          <textarea
-            value={schemaCtx}
-            onChange={(e) => setSchemaCtx(e.target.value)}
-            placeholder="Paste CREATE TABLE statements or describe your schema…"
-            rows={3}
-            className="w-full mt-1.5 bg-surface-100 border border-surface-border rounded-lg px-2 py-1.5 text-[10px] font-mono text-fg-base placeholder:text-fg-subtle resize-none focus:outline-none focus:border-brand-500"
-          />
+        ) : !database ? (
+          <span className="text-2xs text-yellow-500/90 flex items-center gap-1.5">
+            <FontAwesomeIcon icon={faDatabase} className="text-xs" />
+            Select a database for full schema context
+          </span>
+        ) : schemaLoading ? (
+          <span className="text-2xs text-fg-subtle flex items-center gap-1.5">
+            <FontAwesomeIcon icon={faSpinner} className="animate-spin text-xs" />
+            Loading schema…
+          </span>
+        ) : schemaText ? (
+          <span className="text-2xs text-green-500 flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
+            Schema loaded · <strong>{tableCount}</strong> table{tableCount !== 1 ? "s" : ""} in &ldquo;{database}&rdquo;
+          </span>
+        ) : (
+          <span className="text-2xs text-fg-subtle">No tables yet in &ldquo;{database}&rdquo;</span>
         )}
+        <span className="ml-auto text-2xs bg-brand-500/10 text-brand-400 px-1.5 py-0.5 rounded font-medium">Gemini</span>
       </div>
 
-      {/* Prompt input */}
-      <div className="shrink-0 px-2 pb-3">
+      {/* Messages */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 min-h-0">
+        {messages.length === 0 && (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-7 h-7 rounded-lg bg-brand-600/20 flex items-center justify-center">
+                <FontAwesomeIcon icon={faRobot} className="text-brand-400 text-sm" />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-fg-base">PocketDB AI Assistant</p>
+                <p className="text-2xs text-fg-subtle">Powered by Gemini</p>
+              </div>
+            </div>
+            <p className="text-xs text-fg-subtle leading-relaxed mb-3">
+              {schemaText
+                ? `I know your full schema — ${tableCount} table${tableCount !== 1 ? "s" : ""} in "${database}". Ask anything!`
+                : isRedis
+                ? "Ask about Redis commands, keys, data structures, or performance."
+                : "Ask about SQL queries, schema design, or your database."}
+            </p>
+            <div className="grid gap-1.5">
+              {examplePrompts.map((ex) => (
+                <button
+                  key={ex}
+                  onClick={() => setPrompt(ex)}
+                  className="text-left text-xs text-fg-subtle hover:text-fg-base px-3 py-2 rounded-lg hover:bg-surface-100 border border-surface-border hover:border-brand-500/40 transition-colors"
+                >
+                  <FontAwesomeIcon icon={faArrowRight} className="mr-2 text-brand-400 text-xs" />
+                  {ex}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {messages.map((msg, idx) => renderMessage(msg, idx))}
+      </div>
+
+      {/* Input */}
+      <div className="shrink-0 border-t border-surface-border p-2">
+        {messages.length > 0 && (
+          <div className="flex justify-between items-center mb-1.5 px-0.5">
+            <span className="text-2xs text-fg-subtle">
+              {messages.filter((m) => m.role === "user").length} message{messages.filter((m) => m.role === "user").length !== 1 ? "s" : ""}
+            </span>
+            <button
+              onClick={() => setMessages([])}
+              className="text-2xs text-fg-subtle hover:text-red-400 transition-colors"
+            >
+              Clear chat
+            </button>
+          </div>
+        )}
         <div className="relative">
           <textarea
             value={prompt}
@@ -337,33 +456,33 @@ function AIAssistPanel({
                 if (!streaming) handleGenerate();
               }
             }}
-            placeholder={clusterId ? placeholder : "Select a cluster first…"}
+            placeholder={clusterId ? (isRedis ? "Ask about Redis…" : "Ask about your database…") : "Select a cluster first…"}
             disabled={!clusterId || streaming}
             rows={3}
             className="w-full bg-surface-100 border border-surface-border rounded-xl px-3 pt-2.5 pb-8 text-xs text-fg-base placeholder:text-fg-subtle resize-none focus:outline-none focus:border-brand-500 disabled:opacity-50 transition-colors"
           />
-          <div className="absolute bottom-2 right-2 flex gap-1.5">
+          <div className="absolute bottom-2 right-2">
             {streaming ? (
               <button
                 onClick={handleStop}
-                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 text-[10px] transition-colors"
+                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs transition-colors"
               >
-                <FontAwesomeIcon icon={faStop} className="text-[9px]" />
+                <FontAwesomeIcon icon={faStop} className="text-xs" />
                 Stop
               </button>
             ) : (
               <button
                 onClick={handleGenerate}
                 disabled={!prompt.trim() || !clusterId}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-brand-600 hover:bg-brand-500 disabled:opacity-40 text-white text-[10px] font-medium transition-colors"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-brand-600 hover:bg-brand-500 disabled:opacity-40 text-white text-xs font-medium transition-colors"
               >
-                <FontAwesomeIcon icon={faWandMagicSparkles} className="text-[9px]" />
-                Generate
+                <FontAwesomeIcon icon={faWandMagicSparkles} className="text-xs" />
+                Send
               </button>
             )}
           </div>
           <div className="absolute bottom-2 left-3">
-            <span className="text-[9px] text-fg-subtle">↵ to send · ⇧↵ newline</span>
+            <span className="text-xs text-fg-subtle">↵ to send · ⇧↵ newline</span>
           </div>
         </div>
       </div>
@@ -428,13 +547,13 @@ function ClusterPicker({
           <>
             <FontAwesomeIcon
               icon={dbMeta(selected.db_type ?? "postgres").icon}
-              className={cn("text-[10px] shrink-0", dbMeta(selected.db_type ?? "postgres").color)}
+              className={cn("text-xs shrink-0", dbMeta(selected.db_type ?? "postgres").color)}
             />
             <span className="flex-1 text-left truncate text-xs text-fg-base font-medium">
               {selected.name}
             </span>
             <span className={cn(
-              "text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0",
+              "text-xs font-semibold px-1.5 py-0.5 rounded shrink-0",
               dbMeta(selected.db_type ?? "postgres").bg,
               dbMeta(selected.db_type ?? "postgres").color,
             )}>
@@ -443,13 +562,13 @@ function ClusterPicker({
           </>
         ) : (
           <>
-            <FontAwesomeIcon icon={faDatabase} className="text-fg-subtle text-[10px] shrink-0" />
+            <FontAwesomeIcon icon={faDatabase} className="text-fg-subtle text-xs shrink-0" />
             <span className="flex-1 text-left text-xs text-fg-subtle">— Select a running cluster —</span>
           </>
         )}
         <FontAwesomeIcon
           icon={faChevronDown}
-          className={cn("text-fg-subtle text-[9px] shrink-0 transition-transform", open && "rotate-180")}
+          className={cn("text-fg-subtle text-xs shrink-0 transition-transform", open && "rotate-180")}
         />
       </button>
 
@@ -458,7 +577,7 @@ function ClusterPicker({
         <div className="absolute left-0 top-[calc(100%+4px)] z-50 w-full min-w-[260px] rounded-xl border border-surface-border bg-surface shadow-xl shadow-black/30 overflow-hidden">
           {/* Search */}
           <div className="flex items-center gap-2 px-2.5 py-2 border-b border-surface-border">
-            <FontAwesomeIcon icon={faMagnifyingGlass} className="text-fg-subtle text-[10px] shrink-0" />
+            <FontAwesomeIcon icon={faMagnifyingGlass} className="text-fg-subtle text-xs shrink-0" />
             <input
               autoFocus
               value={search}
@@ -492,14 +611,14 @@ function ClusterPicker({
                 >
                   <FontAwesomeIcon
                     icon={m.icon}
-                    className={cn("text-[10px] shrink-0", isActive ? "text-brand-400" : m.color)}
+                    className={cn("text-xs shrink-0", isActive ? "text-brand-400" : m.color)}
                   />
                   <span className="flex-1 text-left truncate font-medium">{c.name}</span>
-                  <span className={cn("text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0", m.bg, m.color)}>
+                  <span className={cn("text-xs font-semibold px-1.5 py-0.5 rounded shrink-0", m.bg, m.color)}>
                     {(c.db_type ?? "postgres").toUpperCase()} {c.db_version}
                   </span>
                   {isActive && (
-                    <FontAwesomeIcon icon={faCheck} className="text-brand-400 text-[9px] shrink-0" />
+                    <FontAwesomeIcon icon={faCheck} className="text-brand-400 text-xs shrink-0" />
                   )}
                 </button>
               );
@@ -570,16 +689,16 @@ function DatabasePicker({
           open && "border-brand-500 bg-surface-100",
         )}
       >
-        <FontAwesomeIcon icon={faDatabase} className="text-brand-400 text-[10px] shrink-0" />
+        <FontAwesomeIcon icon={faDatabase} className="text-brand-400 text-xs shrink-0" />
         <span className={cn("flex-1 text-left truncate text-xs", value ? "text-fg-base" : "text-fg-subtle")}>
           {value || "— database —"}
         </span>
         {loading ? (
-          <FontAwesomeIcon icon={faSpinner} className="text-fg-subtle text-[10px] animate-spin shrink-0" />
+          <FontAwesomeIcon icon={faSpinner} className="text-fg-subtle text-xs animate-spin shrink-0" />
         ) : (
           <FontAwesomeIcon
             icon={faChevronDown}
-            className={cn("text-fg-subtle text-[9px] shrink-0 transition-transform", open && "rotate-180")}
+            className={cn("text-fg-subtle text-xs shrink-0 transition-transform", open && "rotate-180")}
           />
         )}
       </button>
@@ -589,7 +708,7 @@ function DatabasePicker({
         <div className="absolute left-0 top-[calc(100%+4px)] z-50 w-56 rounded-xl border border-surface-border bg-surface shadow-xl shadow-black/30 overflow-hidden">
           {/* Search */}
           <div className="flex items-center gap-2 px-2.5 py-2 border-b border-surface-border">
-            <FontAwesomeIcon icon={faMagnifyingGlass} className="text-fg-subtle text-[10px] shrink-0" />
+            <FontAwesomeIcon icon={faMagnifyingGlass} className="text-fg-subtle text-xs shrink-0" />
             <input
               autoFocus
               value={search}
@@ -633,16 +752,16 @@ function DatabasePicker({
                 <FontAwesomeIcon
                   icon={faDatabase}
                   className={cn(
-                    "text-[9px] shrink-0",
+                    "text-xs shrink-0",
                     db.name === value ? "text-brand-400" : "text-fg-subtle group-hover:text-brand-400",
                   )}
                 />
                 <span className="flex-1 text-left truncate font-mono">{db.name}</span>
                 {db.size && (
-                  <span className="text-[10px] text-fg-subtle shrink-0">{db.size}</span>
+                  <span className="text-xs text-fg-subtle shrink-0">{db.size}</span>
                 )}
                 {db.name === value && (
-                  <FontAwesomeIcon icon={faCheck} className="text-brand-400 text-[9px] shrink-0" />
+                  <FontAwesomeIcon icon={faCheck} className="text-brand-400 text-xs shrink-0" />
                 )}
               </button>
             ))}
@@ -665,7 +784,7 @@ export default function QueryEditorPage() {
   const [result, setResult]     = useState<QueryResult | null>(null);
   const [history, setHistory]   = useState<{ query: string; time: Date; result: QueryResult }[]>([]);
   const [copied, setCopied]     = useState(false);
-  const [activeTab, setActiveTab] = useState<"snippets" | "history" | "ai">("snippets");
+  const [rightPanel, setRightPanel] = useState<null | "history" | "ai">(null);
   const [selectedDatabase, setSelectedDatabase] = useState<string>("");
 
   const zenMode = useUIStore((s) => s.zenMode);
@@ -690,7 +809,6 @@ export default function QueryEditorPage() {
   const dbType  = ((selectedCluster?.db_type ?? "postgres") as DbType);
   const isRedis = dbType === "redis";
   const meta    = DB_META[dbType] ?? DB_META.postgres;
-  const snippets = SNIPPETS[dbType] ?? SNIPPETS.postgres;
 
   const { data: databases = [], refetch: refetchDatabases } = useDatabases(isRedis ? "" : (selectedClusterId ?? ""));
 
@@ -752,7 +870,7 @@ export default function QueryEditorPage() {
 
         {selectedCluster && (
           <span className={cn("hidden sm:inline-flex items-center gap-1.5 text-2xs font-semibold px-2 py-1 rounded-md", meta.bg, meta.color)}>
-            <FontAwesomeIcon icon={meta.icon} className="text-[10px]" />
+            <FontAwesomeIcon icon={meta.icon} className="text-xs" />
             {meta.label} {selectedCluster.db_version}
           </span>
         )}
@@ -781,12 +899,46 @@ export default function QueryEditorPage() {
         )}
         {clusters.length === 0 && (
           <span className="hidden sm:flex items-center gap-1.5 text-xs text-yellow-400">
-            <FontAwesomeIcon icon={faCircleDot} className="animate-pulse text-[10px]" />
+            <FontAwesomeIcon icon={faCircleDot} className="animate-pulse text-xs" />
             No running clusters
           </span>
         )}
 
         <div className="ml-auto flex items-center gap-2">
+          {/* History button */}
+          <button
+            onClick={() => setRightPanel((p) => p === "history" ? null : "history")}
+            className={cn(
+              "btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5",
+              rightPanel === "history" && "bg-brand-500/10 border-brand-500/40 text-brand-400",
+            )}
+            title="Query History"
+          >
+            <FontAwesomeIcon icon={faClockRotateLeft} className="text-xs" />
+            <span className="hidden sm:inline">History</span>
+            {history.length > 0 && (
+              <span className="text-xs bg-brand-500/20 text-brand-400 px-1.5 rounded-full leading-none">
+                {history.length}
+              </span>
+            )}
+          </button>
+
+          {/* AI button */}
+          <button
+            onClick={() => setRightPanel((p) => p === "ai" ? null : "ai")}
+            className={cn(
+              "btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5",
+              rightPanel === "ai" && "bg-brand-500/10 border-brand-500/40 text-brand-400",
+            )}
+            title="AI Assistant"
+          >
+            <FontAwesomeIcon icon={faRobot} className="text-xs" />
+            <span className="hidden sm:inline">AI</span>
+            <span className="text-xs bg-brand-500/20 text-brand-400 px-1 rounded leading-none font-medium">✨</span>
+          </button>
+
+          <div className="w-px h-4 bg-surface-border" />
+
           <button
             onClick={toggleZenMode}
             className="btn-secondary text-xs py-1.5 px-2.5"
@@ -825,7 +977,7 @@ export default function QueryEditorPage() {
             Redis mode — one command per run.{" "}
             {["PING", "GET key", "KEYS *", "INFO server", "DBSIZE"].map((cmd) => (
               <code key={cmd} onClick={() => setQuery(cmd)}
-                className="cursor-pointer font-mono text-red-400 bg-red-500/10 hover:bg-red-500/20 transition-colors px-1 py-0.5 rounded text-[10px] mr-1">
+                className="cursor-pointer font-mono text-red-400 bg-red-500/10 hover:bg-red-500/20 transition-colors px-1 py-0.5 rounded text-xs mr-1">
                 {cmd}
               </code>
             ))}
@@ -835,105 +987,6 @@ export default function QueryEditorPage() {
 
       {/* ── Main area ─────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden flex min-h-0">
-
-        {/* ── Left panel: snippets / history ─────────────────────────────── */}
-        <div className="hidden lg:flex w-52 xl:w-60 flex-col border-r border-surface-border overflow-hidden shrink-0">
-          {/* Tab toggle */}
-          <div className="shrink-0 flex border-b border-surface-border">
-            {(["snippets", "history", "ai"] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={cn(
-                  "flex-1 flex items-center justify-center gap-1 py-2.5 text-xs font-medium transition-colors border-b-2",
-                  activeTab === tab
-                    ? "border-brand-500 text-fg-strong"
-                    : "border-transparent text-fg-muted hover:text-fg-base",
-                )}
-              >
-                <FontAwesomeIcon
-                  icon={tab === "snippets" ? faLightbulb : tab === "history" ? faClockRotateLeft : faWandMagicSparkles}
-                  className="text-[10px]"
-                />
-                {tab === "snippets" ? "Snippets" : tab === "history" ? "History" : "AI"}
-                {tab === "history" && history.length > 0 && (
-                  <span className="text-2xs bg-brand-500/20 text-brand-400 px-1 rounded-full leading-none">
-                    {history.length}
-                  </span>
-                )}
-                {tab === "ai" && (
-                  <span className="text-[9px] bg-brand-500/20 text-brand-400 px-1 rounded leading-none font-medium">
-                    ✦
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-
-          {activeTab === "snippets" && (
-            <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5">
-              {snippets.map((item, i) => (
-                <button
-                  key={i}
-                  onClick={() => setQuery(item.query)}
-                  className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-surface-100 transition-colors group"
-                >
-                  <p className="text-xs font-medium text-fg-base group-hover:text-fg-strong truncate">{item.label}</p>
-                  <p className="text-2xs text-fg-subtle font-mono mt-0.5 truncate">{item.query.replace(/\n/g, " ")}</p>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {activeTab === "history" && (
-            <div className="flex-1 overflow-y-auto p-1.5">
-              {history.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center gap-2 text-center px-3">
-                  <FontAwesomeIcon icon={faClockRotateLeft} className="text-fg-subtle text-xl" />
-                  <p className="text-xs text-fg-subtle">Run a query to build history</p>
-                </div>
-              ) : (
-                <div className="space-y-0.5">
-                  <div className="flex justify-end px-1 pb-1">
-                    <button onClick={() => setHistory([])} className="text-2xs text-red-400 hover:text-red-300 transition-colors">
-                      Clear all
-                    </button>
-                  </div>
-                  {history.map((item, i) => (
-                    <button
-                      key={i}
-                      onClick={() => { setQuery(item.query); setResult(item.result); }}
-                      className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-surface-100 transition-colors group"
-                    >
-                      <p className="text-2xs text-fg-subtle mb-0.5">{relTime(item.time)}</p>
-                      <p className="text-xs text-fg-muted group-hover:text-fg-base font-mono truncate">
-                        {item.query.replace(/\n/g, " ")}
-                      </p>
-                      {item.result.error ? (
-                        <p className="text-2xs text-red-400 mt-0.5 truncate">
-                          Error: {item.result.error}
-                        </p>
-                      ) : (
-                        <p className="text-2xs text-green-500 mt-0.5">
-                          {item.result.row_count} row{item.result.row_count !== 1 ? "s" : ""} · {item.result.execution_time_ms}ms
-                        </p>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className={cn("flex-1 min-h-0 overflow-hidden", activeTab !== "ai" && "hidden")}>
-            <AIAssistPanel
-              dbType={dbType}
-              dbVersion={selectedCluster?.db_version ?? ""}
-              clusterId={selectedClusterId}
-              onUseSQL={(sql) => { setQuery(sql); toast.success("SQL inserted into editor"); }}
-            />
-          </div>
-        </div>
 
         {/* ── Editor + Results ────────────────────────────────────────────── */}
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
@@ -950,7 +1003,7 @@ export default function QueryEditorPage() {
               <span className="text-2xs text-fg-subtle font-mono">Ctrl + ↵ to run</span>
             </div>
             <textarea
-              className="flex-1 w-full bg-surface font-mono text-sm p-4 resize-none focus:outline-none"
+              className="flex-1 w-full bg-surface font-mono text-base p-4 resize-none focus:outline-none"
               style={{ color: "var(--text-strong)", minHeight: 0 }}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -977,7 +1030,7 @@ export default function QueryEditorPage() {
 
               {isPending && (
                 <span className="flex items-center gap-1.5 text-xs text-brand-400 ml-1">
-                  <FontAwesomeIcon icon={faSpinner} className="animate-spin text-[10px]" />
+                  <FontAwesomeIcon icon={faSpinner} className="animate-spin text-xs" />
                   Running…
                 </span>
               )}
@@ -998,7 +1051,7 @@ export default function QueryEditorPage() {
                 >
                   <FontAwesomeIcon
                     icon={copied ? faCheck : faCopy}
-                    className={cn("text-[10px]", copied && "text-green-400")}
+                    className={cn("text-xs", copied && "text-green-400")}
                   />
                   {copied ? "Copied!" : "Copy"}
                 </button>
@@ -1044,6 +1097,90 @@ export default function QueryEditorPage() {
             </div>
           </div>
         </div>
+
+        {/* ── Right panel: History / AI ───────────────────────────────── */}
+        {rightPanel && (
+          <div className="w-80 xl:w-96 shrink-0 flex flex-col border-l border-surface-border bg-surface overflow-hidden">
+            {/* Panel header */}
+            <div className="shrink-0 flex items-center justify-between px-3 py-2.5 border-b border-surface-border bg-surface-50">
+              <span className="flex items-center gap-2 text-xs font-semibold text-fg-base">
+                <FontAwesomeIcon
+                  icon={rightPanel === "history" ? faClockRotateLeft : faRobot}
+                  className="text-brand-400 text-xs"
+                />
+                {rightPanel === "history" ? "Query History" : "AI Assistant"}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setRightPanel(rightPanel === "history" ? "ai" : "history")}
+                  className="text-2xs text-fg-subtle hover:text-fg-base transition-colors px-1.5 py-0.5 rounded hover:bg-surface-100"
+                >
+                  Switch to {rightPanel === "history" ? "AI" : "History"}
+                </button>
+                <button
+                  onClick={() => setRightPanel(null)}
+                  className="w-6 h-6 flex items-center justify-center rounded-md text-fg-subtle hover:text-fg-base hover:bg-surface-100 transition-colors"
+                  title="Close panel"
+                >
+                  <FontAwesomeIcon icon={faXmark} className="text-xs" />
+                </button>
+              </div>
+            </div>
+
+            {/* History content */}
+            {rightPanel === "history" && (
+              <div className="flex-1 overflow-y-auto p-1.5">
+                {history.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center gap-3 text-center px-4">
+                    <FontAwesomeIcon icon={faClockRotateLeft} className="text-fg-subtle/40 text-2xl" />
+                    <p className="text-xs text-fg-subtle">Run a query to build history</p>
+                  </div>
+                ) : (
+                  <div className="space-y-0.5">
+                    <div className="flex justify-end px-1 pb-1">
+                      <button onClick={() => setHistory([])} className="text-2xs text-red-400 hover:text-red-300 transition-colors">
+                        Clear all
+                      </button>
+                    </div>
+                    {history.map((item, i) => (
+                      <button
+                        key={i}
+                        onClick={() => { setQuery(item.query); setResult(item.result); }}
+                        className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-surface-100 transition-colors group"
+                      >
+                        <p className="text-2xs text-fg-subtle mb-0.5">{relTime(item.time)}</p>
+                        <p className="text-xs text-fg-muted group-hover:text-fg-base font-mono truncate">
+                          {item.query.replace(/\n/g, " ")}
+                        </p>
+                        {item.result.error ? (
+                          <p className="text-2xs text-red-400 mt-0.5 truncate">Error: {item.result.error}</p>
+                        ) : (
+                          <p className="text-2xs text-green-500 mt-0.5">
+                            {item.result.row_count} row{item.result.row_count !== 1 ? "s" : ""} · {item.result.execution_time_ms}ms
+                          </p>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* AI content */}
+            {rightPanel === "ai" && (
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <AIAssistPanel
+                  dbType={dbType}
+                  dbVersion={selectedCluster?.db_version ?? ""}
+                  clusterId={selectedClusterId}
+                  clusterName={selectedCluster?.name ?? ""}
+                  database={selectedDatabase}
+                  onUseSQL={(sql) => { setQuery(sql); toast.success("SQL inserted into editor"); }}
+                />
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── Status bar ────────────────────────────────────────────────────── */}

@@ -132,7 +132,7 @@ function SchemaTree({
               <FontAwesomeIcon icon={meta.icon} className={clsx("text-xs flex-shrink-0", meta.color)} />
               <span className="text-sm font-medium text-white truncate">{db.name}</span>
               {db.size && (
-                <span className="ml-auto text-[10px] text-slate-500 flex-shrink-0 opacity-0 group-hover:opacity-100">
+                <span className="ml-auto text-xs text-slate-500 flex-shrink-0 opacity-0 group-hover:opacity-100">
                   {db.size}
                 </span>
               )}
@@ -171,7 +171,7 @@ function SchemaTree({
                           {tbl.name}
                         </span>
                         {tbl.estimated_rows != null && (
-                          <span className="ml-auto text-[10px] text-slate-500 flex-shrink-0">
+                          <span className="ml-auto text-xs text-slate-500 flex-shrink-0">
                             {tbl.estimated_rows.toLocaleString()}
                           </span>
                         )}
@@ -216,7 +216,7 @@ function TypeBadge({ col }: { col: BrowserColumn }) {
     ? `${type}(${col.character_maximum_length})`
     : type;
   return (
-    <span className={clsx("px-1.5 py-0.5 rounded text-[10px] font-mono border", cls)}>
+    <span className={clsx("px-1.5 py-0.5 rounded text-xs font-mono border", cls)}>
       {display}
     </span>
   );
@@ -245,7 +245,7 @@ function StructureTab({ structure }: { structure: BrowserStructure }) {
               <td className="px-3 py-2.5">
                 <div className="flex items-center gap-2">
                   {(col.is_primary_key === true || col.is_primary_key === 1) && (
-                    <FontAwesomeIcon icon={faKey} className="text-yellow-400 text-[10px]" title="Primary Key" />
+                    <FontAwesomeIcon icon={faKey} className="text-yellow-400 text-xs" title="Primary Key" />
                   )}
                   <span className="font-medium text-white text-xs">{col.name}</span>
                 </div>
@@ -262,7 +262,7 @@ function StructureTab({ structure }: { structure: BrowserStructure }) {
               <td className="px-3 py-2.5">
                 {col.column_key && (
                   <span className={clsx(
-                    "text-[10px] px-1.5 py-0.5 rounded border",
+                    "text-xs px-1.5 py-0.5 rounded border",
                     col.column_key === "PRI" ? "text-yellow-400 border-yellow-500/30 bg-yellow-500/10"
                     : col.column_key === "UNI" ? "text-blue-400 border-blue-500/30 bg-blue-500/10"
                     : col.column_key === "MUL" ? "text-purple-400 border-purple-500/30 bg-purple-500/10"
@@ -308,7 +308,7 @@ function IndexesTab({ structure }: { structure: BrowserStructure }) {
                 <td className="px-3 py-2.5 text-xs font-medium text-white font-mono">{name}</td>
                 <td className="px-3 py-2.5">
                   <span className={clsx(
-                    "text-[10px] px-1.5 py-0.5 rounded border",
+                    "text-xs px-1.5 py-0.5 rounded border",
                     isPrimary ? "text-yellow-400 border-yellow-500/30 bg-yellow-500/10"
                     : isUnique ? "text-blue-400 border-blue-500/30 bg-blue-500/10"
                     : "text-slate-400 border-slate-500/30"
@@ -351,7 +351,7 @@ function ForeignKeysTab({ structure }: { structure: BrowserStructure }) {
               <td className="px-3 py-2.5 text-xs text-slate-400 font-mono">{fk.constraint_name}</td>
               <td className="px-3 py-2.5 text-xs text-white font-medium">{fk.column_name}</td>
               <td className="px-3 py-2.5 text-xs text-brand-400 flex items-center gap-1">
-                <FontAwesomeIcon icon={faLink} className="text-[10px]" />
+                <FontAwesomeIcon icon={faLink} className="text-xs" />
                 {fk.foreign_table}.{fk.foreign_column}
               </td>
             </tr>
@@ -409,11 +409,11 @@ function RowModal({
               <div key={col.name}>
                 <label className="block text-xs font-medium text-slate-400 mb-1">
                   <span className="flex items-center gap-1.5">
-                    {isPk && <FontAwesomeIcon icon={faKey} className="text-yellow-400 text-[10px]" />}
+                    {isPk && <FontAwesomeIcon icon={faKey} className="text-yellow-400 text-xs" />}
                     {col.name}
                     <TypeBadge col={col} />
                     {col.is_nullable === "NO" && !isAutoInc && (
-                      <span className="text-red-400 text-[10px]">required</span>
+                      <span className="text-red-400 text-xs">required</span>
                     )}
                   </span>
                 </label>
@@ -665,7 +665,7 @@ function DataTab({
                   >
                     {pkColumn && (
                       <td className="px-2 py-2 text-center">
-                        <FontAwesomeIcon icon={faKey} className="text-yellow-500/30 group-hover:text-yellow-500/60 text-[9px]" />
+                        <FontAwesomeIcon icon={faKey} className="text-yellow-500/30 group-hover:text-yellow-500/60 text-xs" />
                       </td>
                     )}
                     {data.columns.map((col, ci) => {
@@ -693,7 +693,7 @@ function DataTab({
                               className="w-6 h-6 flex items-center justify-center rounded bg-brand-600/20 hover:bg-brand-600/40 text-brand-400 transition-colors"
                               title="Edit row"
                             >
-                              <FontAwesomeIcon icon={faPen} className="text-[10px]" />
+                              <FontAwesomeIcon icon={faPen} className="text-xs" />
                             </button>
                             <button
                               onClick={() => handleDelete(rowObj)}
@@ -702,8 +702,8 @@ function DataTab({
                               title="Delete row"
                             >
                               {isDeleting
-                                ? <FontAwesomeIcon icon={faSpinner} className="text-[10px] animate-spin" />
-                                : <FontAwesomeIcon icon={faTrash} className="text-[10px]" />
+                                ? <FontAwesomeIcon icon={faSpinner} className="text-xs animate-spin" />
+                                : <FontAwesomeIcon icon={faTrash} className="text-xs" />
                               }
                             </button>
                           </>
@@ -825,11 +825,11 @@ function MainPanel({
         <div className="flex items-center gap-2 px-4 py-2.5 text-xs text-slate-400">
           <FontAwesomeIcon icon={faDatabase} className="text-brand-400" />
           <span>{selection.database}</span>
-          <FontAwesomeIcon icon={faChevronRight} className="text-slate-600 text-[10px]" />
+          <FontAwesomeIcon icon={faChevronRight} className="text-slate-600 text-xs" />
           {selection.schema !== "public" && (
             <>
               <span>{selection.schema}</span>
-              <FontAwesomeIcon icon={faChevronRight} className="text-slate-600 text-[10px]" />
+              <FontAwesomeIcon icon={faChevronRight} className="text-slate-600 text-xs" />
             </>
           )}
           <span className="text-white font-medium">{selection.table}</span>
@@ -852,7 +852,7 @@ function MainPanel({
                   : "border-transparent text-slate-400 hover:text-white"
               )}
             >
-              <FontAwesomeIcon icon={tab.icon} className="text-[10px]" />
+              <FontAwesomeIcon icon={tab.icon} className="text-xs" />
               {tab.label}
             </button>
           ))}

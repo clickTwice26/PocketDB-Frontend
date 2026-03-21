@@ -109,6 +109,9 @@ export const browserApi = {
   listDatabases: (clusterId: string) =>
     api.get(`/clusters/${clusterId}/browser/databases`).then((r) => r.data),
 
+  getFullSchema: (clusterId: string, database: string) =>
+    api.get(`/clusters/${clusterId}/browser/schema`, { params: { database } }).then((r) => r.data),
+
   listTables: (clusterId: string, database: string) =>
     api.get(`/clusters/${clusterId}/browser/databases/${encodeURIComponent(database)}/tables`).then((r) => r.data),
 
@@ -239,6 +242,7 @@ export const aiApi = {
     dbType?: string;
     dbVersion?: string;
     clusterName?: string;
+    schemaContext?: string;
   }): AsyncGenerator<string> {
     return _sseStream("/api/v1/ai/chat", {
       messages: params.messages,
@@ -246,6 +250,7 @@ export const aiApi = {
       db_type: params.dbType ?? "postgres",
       db_version: params.dbVersion ?? "",
       cluster_name: params.clusterName ?? "unknown",
+      schema_context: params.schemaContext ?? "",
     });
   },
 

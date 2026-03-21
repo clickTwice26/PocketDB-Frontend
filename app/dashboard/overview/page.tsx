@@ -32,7 +32,7 @@ const DB_CONFIG: Record<string, { color: string; label: string }> = {
 function StatusPill({ status }: { status: string }) {
   const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.stopped;
   return (
-    <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium border", cfg.pill)}>
+    <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium border", cfg.pill)}>
       <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", cfg.dot)} />
       {cfg.label}
     </span>
@@ -42,7 +42,7 @@ function StatusPill({ status }: { status: string }) {
 function DbBadge({ type, version }: { type: string; version: string }) {
   const cfg = DB_CONFIG[type.toLowerCase()] ?? { color: "bg-surface-200 text-fg-muted border-surface-border", label: type.toUpperCase() };
   return (
-    <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium border", cfg.color)}>
+    <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium border", cfg.color)}>
       {cfg.label} {version}
     </span>
   );
@@ -222,7 +222,7 @@ export default function OverviewPage() {
                 className="text-xs text-brand-500 hover:text-brand-400 font-medium flex items-center gap-1 transition-colors"
               >
                 View all
-                <FontAwesomeIcon icon={faArrowRight} className="text-[10px]" />
+                <FontAwesomeIcon icon={faArrowRight} className="text-xs" />
               </Link>
             </div>
 
@@ -275,7 +275,7 @@ export default function OverviewPage() {
                       </p>
                       <div className="flex items-center gap-2 mt-0.5">
                         <DbBadge type={c.db_type} version={c.db_version} />
-                        <span className="text-[11px] text-fg-subtle">
+                        <span className="text-xs text-fg-subtle">
                           {c.node_count} node{c.node_count !== 1 ? "s" : ""}
                         </span>
                       </div>
@@ -285,7 +285,7 @@ export default function OverviewPage() {
                     <StatusPill status={c.status} />
 
                     {/* Time */}
-                    <span className="hidden sm:block text-[11px] text-fg-subtle shrink-0 min-w-[90px] text-right">
+                    <span className="hidden sm:block text-xs text-fg-subtle shrink-0 min-w-[90px] text-right">
                       {formatDistanceToNow(new Date(c.created_at), { addSuffix: true })}
                     </span>
                   </Link>
@@ -320,9 +320,9 @@ export default function OverviewPage() {
                       </div>
                       <div className="min-w-0">
                         <p className="text-xs font-medium text-fg-strong">{a.label}</p>
-                        <p className="text-[11px] text-fg-subtle truncate">{a.sub}</p>
+                        <p className="text-xs text-fg-subtle truncate">{a.sub}</p>
                       </div>
-                      <FontAwesomeIcon icon={faArrowRight} className="ml-auto text-[10px] text-fg-subtle group-hover:text-brand-500 transition-colors shrink-0" />
+                      <FontAwesomeIcon icon={faArrowRight} className="ml-auto text-xs text-fg-subtle group-hover:text-brand-500 transition-colors shrink-0" />
                     </div>
                   );
                   return a.onClick
@@ -352,7 +352,7 @@ export default function OverviewPage() {
                     return (
                       <div key={type}>
                         <div className="flex items-center justify-between mb-1.5">
-                          <span className={cn("text-[11px] font-medium px-2 py-0.5 rounded-md border", cfg.color)}>
+                          <span className={cn("text-xs font-medium px-2 py-0.5 rounded-md border", cfg.color)}>
                             {cfg.label}
                           </span>
                           <span className="text-xs text-fg-muted">{count} cluster{count !== 1 ? "s" : ""}</span>

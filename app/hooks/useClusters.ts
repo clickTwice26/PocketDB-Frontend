@@ -10,6 +10,7 @@ export const clusterKeys = {
   stats: (id: string) => [...clusterKeys.all, "stats", id] as const,
   health: (id: string) => [...clusterKeys.all, "health", id] as const,
   databases: (id: string) => [...clusterKeys.detail(id), "databases"] as const,
+  schema: (id: string, db: string) => [...clusterKeys.detail(id), "schema", db] as const,
 };
 
 export function useClusters(status?: string) {
@@ -111,5 +112,14 @@ export function useExecuteQuery() {
       database?: string;
     }) => clusterApi.query(clusterId, query, nodeId, database),
     onError: (err: Error) => toast.error(err.message),
+  });
+}
+
+export function useSchemaContext(clusterId: string, database: string) {
+  return useQuery<{ schema_text: string; table_count: number }>({
+    queryKey: clusterKeys.schema(clusterId, database),
+    queryFn: () => browserApi.getFullSchema(clusterId, database),
+    enabled: !!clusterId && !!database,
+    staleTime: 60_000,
   });
 }

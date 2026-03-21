@@ -7,7 +7,8 @@ module.exports = {
   theme: {
     extend: {
       fontSize: {
-        "2xs": ["0.625rem", { lineHeight: "1rem" }], // 10px — use for micro labels only
+        "2xs": ["0.8125rem", { lineHeight: "1.25rem" }], // 13px — minimum size
+        "xs":  ["0.8125rem", { lineHeight: "1.25rem" }], // 13px — override Tailwind default (12px)
       },
       colors: {
         /* Semantic foreground — adapts to each theme automatically */

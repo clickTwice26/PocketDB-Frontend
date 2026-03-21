@@ -161,7 +161,7 @@ export default function Topbar({ title, subtitle }: TopbarProps) {
           <FontAwesomeIcon
             icon={faChevronDown}
             className={cn(
-              "text-[10px] text-muted-token transition-transform duration-200",
+              "text-xs text-muted-token transition-transform duration-200",
               open && "rotate-180"
             )}
           />
@@ -179,7 +179,7 @@ export default function Topbar({ title, subtitle }: TopbarProps) {
               "py-1.5 overflow-hidden animate-slide-up"
             )}
           >
-            <p className="px-3 pt-0.5 pb-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-token select-none">
+            <p className="px-3 pt-0.5 pb-1.5 text-xs font-semibold uppercase tracking-widest text-muted-token select-none">
               Appearance
             </p>
             <div className="h-px bg-surface-border mx-3 mb-1" />
@@ -200,17 +200,17 @@ export default function Topbar({ title, subtitle }: TopbarProps) {
                   )}
                 >
                   <span className={cn(
-                    "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-[11px]",
+                    "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-xs",
                     isActive ? "bg-brand-500/20 text-brand-400" : "bg-surface-200 text-muted-token"
                   )}>
                     <FontAwesomeIcon icon={t.icon} />
                   </span>
                   <span className="flex flex-col items-start gap-0.5 flex-1 min-w-0">
                     <span className={cn("font-medium", isActive && "text-brand-300")}>{t.label}</span>
-                    <span className="text-[10px] text-muted-token">{t.desc}</span>
+                    <span className="text-xs text-muted-token">{t.desc}</span>
                   </span>
                   {isActive && (
-                    <FontAwesomeIcon icon={faCheck} className="text-brand-400 text-[10px] shrink-0" />
+                    <FontAwesomeIcon icon={faCheck} className="text-brand-400 text-xs shrink-0" />
                   )}
                 </button>
               );
@@ -236,13 +236,13 @@ export default function Topbar({ title, subtitle }: TopbarProps) {
                 userMenuOpen && "border-brand-500/60 ring-1 ring-brand-500/30"
               )}
             >
-              <span className="w-6 h-6 rounded-md bg-brand-500/20 text-brand-300 flex items-center justify-center text-[10px] font-bold shrink-0 select-none">
+              <span className="w-6 h-6 rounded-md bg-brand-500/20 text-brand-300 flex items-center justify-center text-xs font-bold shrink-0 select-none">
                 {initials}
               </span>
               <span className="hidden sm:inline max-w-[120px] truncate">{user.name}</span>
               <FontAwesomeIcon
                 icon={faChevronDown}
-                className={cn("text-[10px] text-muted-token transition-transform duration-200", userMenuOpen && "rotate-180")}
+                className={cn("text-xs text-muted-token transition-transform duration-200", userMenuOpen && "rotate-180")}
               />
             </button>
 
@@ -255,7 +255,7 @@ export default function Topbar({ title, subtitle }: TopbarProps) {
               >
                 <div className="px-3 py-2 border-b border-surface-border mb-1">
                   <p className="text-xs font-semibold text-white truncate">{user.name}</p>
-                  <p className="text-[10px] text-muted-token truncate">{user.email}</p>
+                  <p className="text-xs text-muted-token truncate">{user.email}</p>
                 </div>
                 <button
                   role="menuitem"
@@ -266,7 +266,7 @@ export default function Topbar({ title, subtitle }: TopbarProps) {
                   }}
                   className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors cursor-pointer"
                 >
-                  <FontAwesomeIcon icon={faRightFromBracket} className="text-[11px]" />
+                  <FontAwesomeIcon icon={faRightFromBracket} className="text-xs" />
                   Sign out
                 </button>
               </div>,
