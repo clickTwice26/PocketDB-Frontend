@@ -1,10 +1,12 @@
 "use client";
+import { useState, useEffect } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faPalette, faCheck, faMoon, faSun, faLeaf } from "@fortawesome/free-solid-svg-icons";
+import { faPalette, faCheck, faMoon, faSun, faLeaf, faRobot, faCircleCheck, faTriangleExclamation, faSpinner } from "@fortawesome/free-solid-svg-icons";
 import Topbar from "@/components/layout/Topbar";
 import { useUIStore } from "@/store/ui";
 import type { Theme } from "@/store/ui";
 import clsx from "clsx";
+import { aiApi } from "@/lib/api";
 
 const THEMES: { id: Theme; label: string; desc: string; icon: typeof faMoon; accentDot: string; previewBg: string }[] = [
   { id: "dark",  label: "Dark",  desc: "Indigo accent · Dark navy",    icon: faMoon, accentDot: "bg-indigo-500",  previewBg: "#1a1d27" },
@@ -14,6 +16,15 @@ const THEMES: { id: Theme; label: string; desc: string; icon: typeof faMoon; acc
 
 export default function SettingsPage() {
   const { theme, setTheme } = useUIStore();
+  const [aiStatus, setAiStatus] = useState<{ available: boolean; model: string | null; message: string } | null>(null);
+  const [aiLoading, setAiLoading] = useState(true);
+
+  useEffect(() => {
+    aiApi.status()
+      .then(setAiStatus)
+      .catch(() => setAiStatus({ available: false, model: null, message: "Could not reach backend" }))
+      .finally(() => setAiLoading(false));
+  }, []);
 
   return (
     <div className="min-h-full">
@@ -92,6 +103,49 @@ export default function SettingsPage() {
                 </button>
               );
             })}
+          </div>
+        </div>
+
+        {/* AI Configuration */}
+        <div className="card space-y-4">
+          <div>
+            <h3 className="text-sm font-semibold text-white flex items-center gap-2 mb-0.5">
+              <FontAwesomeIcon icon={faRobot} className="text-brand-400" />
+              AI Assistant
+            </h3>
+            <p className="text-xs text-slate-500 ml-5">
+              Powered by Google Gemini — generates SQL queries from plain English descriptions.
+            </p>
+          </div>
+
+          <div className="bg-surface-100 rounded-xl p-4 flex items-start gap-3">
+            {aiLoading ? (
+              <FontAwesomeIcon icon={faSpinner} className="text-brand-400 animate-spin mt-0.5" />
+            ) : aiStatus?.available ? (
+              <FontAwesomeIcon icon={faCircleCheck} className="text-green-400 mt-0.5 shrink-0" />
+            ) : (
+              <FontAwesomeIcon icon={faTriangleExclamation} className="text-yellow-400 mt-0.5 shrink-0" />
+            )}
+            <div className="min-w-0">
+              <p className={clsx("text-sm font-medium", aiStatus?.available ? "text-green-400" : "text-yellow-400")}>
+                {aiLoading ? "Checking AI status…" : aiStatus?.available ? "AI Ready" : "AI Not Configured"}
+              </p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {aiLoading ? "" : aiStatus?.available
+                  ? `Model: ${aiStatus.model} · SQL generation and database chat are available.`
+                  : "Set GEMINI_API_KEY in backend/.env to enable AI features."}
+              </p>
+              {!aiLoading && !aiStatus?.available && (
+                <div className="mt-3 bg-surface-50 border border-surface-border rounded-lg p-3">
+                  <p className="text-xs text-slate-400 font-mono mb-1">backend/.env</p>
+                  <code className="text-xs text-brand-400 font-mono">GEMINI_API_KEY=your_key_here</code>
+                  <p className="text-xs text-slate-500 mt-2">
+                    Get a free API key at{" "}
+                    <span className="text-brand-400">aistudio.google.com</span>
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

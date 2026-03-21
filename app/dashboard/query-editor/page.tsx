@@ -1,17 +1,20 @@
 "use client";
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faPlay, faTrash, faSpinner, faDatabase, faCircleDot,
   faCode, faTerminal, faTriangleExclamation, faCopy, faCheck,
   faLayerGroup, faBolt, faLightbulb, faClockRotateLeft,
-  faExpand, faCompress,
+  faExpand, faCompress, faWandMagicSparkles, faArrowUp,
+  faStop, faArrowRight, faRotateRight, faRobot,
 } from "@fortawesome/free-solid-svg-icons";
 import { useClusters, useExecuteQuery } from "@/hooks/useClusters";
 import Topbar from "@/components/layout/Topbar";
 import { useUIStore } from "@/store/ui";
 import { cn } from "@/lib/utils";
 import type { ClusterListItem, QueryResult } from "@/types";
+import { aiApi } from "@/lib/api";
+import toast from "react-hot-toast";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -142,6 +145,232 @@ function SqlTable({ result }: { result: QueryResult }) {
   );
 }
 
+// ─── AI Assistant Panel ───────────────────────────────────────────────────────
+
+const SQL_PROMPT_EXAMPLES = [
+  "Show all tables with their row counts",
+  "Find duplicate emails in users",
+  "Get the 10 most recent orders with their total value",
+  "Create an index on the email column",
+  "Show slow queries running over 1 second",
+];
+
+function AIAssistPanel({
+  dbType,
+  dbVersion,
+  clusterId,
+  onUseSQL,
+}: {
+  dbType: string;
+  dbVersion: string;
+  clusterId: string;
+  onUseSQL: (sql: string) => void;
+}) {
+  const [prompt, setPrompt]       = useState("");
+  const [response, setResponse]   = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const [schemaCtx, setSchemaCtx] = useState("");
+  const [showCtx, setShowCtx]     = useState(false);
+  const abortRef = useRef<{ abort: boolean }>({ abort: false });
+  const responseRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll while streaming
+  useEffect(() => {
+    if (streaming && responseRef.current) {
+      responseRef.current.scrollTop = responseRef.current.scrollHeight;
+    }
+  }, [response, streaming]);
+
+  const handleGenerate = useCallback(async () => {
+    if (!prompt.trim() || !clusterId) return;
+    setResponse("");
+    setStreaming(true);
+    abortRef.current.abort = false;
+
+    try {
+      const stream = aiApi.sqlAssistStream({
+        prompt,
+        clusterId,
+        dbType,
+        dbVersion,
+        schemaContext: schemaCtx,
+      });
+      for await (const chunk of stream) {
+        if (abortRef.current.abort) break;
+        setResponse((prev) => prev + chunk);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "AI request failed";
+      toast.error(msg);
+      setResponse(`-- Error: ${msg}`);
+    } finally {
+      setStreaming(false);
+    }
+  }, [prompt, clusterId, dbType, dbVersion, schemaCtx]);
+
+  const handleStop = () => { abortRef.current.abort = true; };
+
+  const handleUse = () => {
+    if (!response) return;
+    // Strip any leading/trailing markdown fences if present
+    const cleaned = response
+      .replace(/^```[\w]*\n?/, "")
+      .replace(/\n?```$/, "")
+      .trim();
+    onUseSQL(cleaned);
+    toast.success("SQL inserted into editor");
+  };
+
+  const handleCopyResponse = () => {
+    navigator.clipboard.writeText(response);
+    toast.success("Copied");
+  };
+
+  const isRedis = dbType === "redis";
+  const placeholder = isRedis
+    ? "e.g. Get all keys matching 'user:*' and their TTLs"
+    : "e.g. Show me the 10 users who placed the most orders last month";
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Header */}
+      <div className="shrink-0 px-3 pt-3 pb-2">
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-6 h-6 rounded-md bg-brand-600/20 flex items-center justify-center">
+            <FontAwesomeIcon icon={faRobot} className="text-brand-400 text-[11px]" />
+          </div>
+          <span className="text-xs font-semibold text-fg-base">AI SQL Assistant</span>
+          <span className="ml-auto text-[10px] text-brand-400 bg-brand-500/10 px-1.5 py-0.5 rounded font-medium">
+            Gemini
+          </span>
+        </div>
+        <p className="text-[10px] text-fg-subtle leading-relaxed">
+          Describe what you want in plain English. AI will generate the {isRedis ? "Redis command" : "SQL query"}.
+        </p>
+      </div>
+
+      {/* Prompt examples */}
+      {!response && !streaming && (
+        <div className="shrink-0 px-2 pb-2 flex flex-col gap-0.5">
+          {SQL_PROMPT_EXAMPLES.slice(0, isRedis ? 2 : 4).map((ex) => (
+            <button
+              key={ex}
+              onClick={() => setPrompt(ex)}
+              className="w-full text-left text-[10px] text-fg-subtle hover:text-fg-base px-2 py-1.5 rounded-lg hover:bg-surface-100 transition-colors truncate"
+            >
+              <FontAwesomeIcon icon={faArrowRight} className="mr-1.5 text-brand-400 text-[9px]" />
+              {ex}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Response area */}
+      {(response || streaming) && (
+        <div
+          ref={responseRef}
+          className="flex-1 overflow-y-auto mx-2 mb-2 min-h-0 rounded-xl bg-surface-100 border border-surface-border p-3"
+        >
+          <pre className="text-[11px] text-fg-base font-mono whitespace-pre-wrap break-words leading-relaxed">
+            {response}
+            {streaming && <span className="inline-block w-1.5 h-3 bg-brand-400 animate-pulse ml-0.5 align-text-bottom" />}
+          </pre>
+        </div>
+      )}
+
+      {/* Response actions */}
+      {response && !streaming && (
+        <div className="shrink-0 flex gap-1.5 px-2 pb-2">
+          <button
+            onClick={handleUse}
+            className="btn-primary text-[11px] py-1.5 px-2.5 flex-1"
+          >
+            <FontAwesomeIcon icon={faArrowRight} className="text-[10px]" />
+            Use in Editor
+          </button>
+          <button
+            onClick={handleCopyResponse}
+            className="btn-secondary text-[11px] py-1.5 px-2"
+            title="Copy"
+          >
+            <FontAwesomeIcon icon={faCopy} className="text-[10px]" />
+          </button>
+          <button
+            onClick={() => { setResponse(""); setPrompt(""); }}
+            className="btn-secondary text-[11px] py-1.5 px-2"
+            title="Clear"
+          >
+            <FontAwesomeIcon icon={faRotateRight} className="text-[10px]" />
+          </button>
+        </div>
+      )}
+
+      {/* Optional schema context */}
+      <div className="shrink-0 px-2 pb-1">
+        <button
+          onClick={() => setShowCtx((v) => !v)}
+          className="text-[10px] text-fg-subtle hover:text-fg-base transition-colors flex items-center gap-1"
+        >
+          <FontAwesomeIcon icon={faDatabase} className="text-[9px]" />
+          {showCtx ? "Hide" : "Add"} schema context (optional)
+        </button>
+        {showCtx && (
+          <textarea
+            value={schemaCtx}
+            onChange={(e) => setSchemaCtx(e.target.value)}
+            placeholder="Paste CREATE TABLE statements or describe your schema…"
+            rows={3}
+            className="w-full mt-1.5 bg-surface-100 border border-surface-border rounded-lg px-2 py-1.5 text-[10px] font-mono text-fg-base placeholder:text-fg-subtle resize-none focus:outline-none focus:border-brand-500"
+          />
+        )}
+      </div>
+
+      {/* Prompt input */}
+      <div className="shrink-0 px-2 pb-3">
+        <div className="relative">
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (!streaming) handleGenerate();
+              }
+            }}
+            placeholder={clusterId ? placeholder : "Select a cluster first…"}
+            disabled={!clusterId || streaming}
+            rows={3}
+            className="w-full bg-surface-100 border border-surface-border rounded-xl px-3 pt-2.5 pb-8 text-xs text-fg-base placeholder:text-fg-subtle resize-none focus:outline-none focus:border-brand-500 disabled:opacity-50 transition-colors"
+          />
+          <div className="absolute bottom-2 right-2 flex gap-1.5">
+            {streaming ? (
+              <button
+                onClick={handleStop}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 text-[10px] transition-colors"
+              >
+                <FontAwesomeIcon icon={faStop} className="text-[9px]" />
+                Stop
+              </button>
+            ) : (
+              <button
+                onClick={handleGenerate}
+                disabled={!prompt.trim() || !clusterId}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-brand-600 hover:bg-brand-500 disabled:opacity-40 text-white text-[10px] font-medium transition-colors"
+              >
+                <FontAwesomeIcon icon={faWandMagicSparkles} className="text-[9px]" />
+                Generate
+              </button>
+            )}
+          </div>
+          <div className="absolute bottom-2 left-3">
+            <span className="text-[9px] text-fg-subtle">↵ to send · ⇧↵ newline</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function QueryEditorPage() {
@@ -154,7 +383,7 @@ export default function QueryEditorPage() {
   const [result, setResult] = useState<QueryResult | null>(null);
   const [history, setHistory] = useState<{ query: string; time: Date }[]>([]);
   const [copied, setCopied]   = useState(false);
-  const [activeTab, setActiveTab] = useState<"snippets" | "history">("snippets");
+  const [activeTab, setActiveTab] = useState<"snippets" | "history" | "ai">("snippets");
 
   const zenMode = useUIStore((s) => s.zenMode);
   const toggleZenMode = useUIStore((s) => s.toggleZenMode);
@@ -309,22 +538,30 @@ export default function QueryEditorPage() {
         <div className="hidden lg:flex w-52 xl:w-60 flex-col border-r border-surface-border overflow-hidden shrink-0">
           {/* Tab toggle */}
           <div className="shrink-0 flex border-b border-surface-border">
-            {(["snippets", "history"] as const).map((tab) => (
+            {(["snippets", "history", "ai"] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
                 className={cn(
-                  "flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium transition-colors border-b-2",
+                  "flex-1 flex items-center justify-center gap-1 py-2.5 text-xs font-medium transition-colors border-b-2",
                   activeTab === tab
                     ? "border-brand-500 text-fg-strong"
                     : "border-transparent text-fg-muted hover:text-fg-base",
                 )}
               >
-                <FontAwesomeIcon icon={tab === "snippets" ? faLightbulb : faClockRotateLeft} className="text-[10px]" />
-                {tab === "snippets" ? "Snippets" : "History"}
+                <FontAwesomeIcon
+                  icon={tab === "snippets" ? faLightbulb : tab === "history" ? faClockRotateLeft : faWandMagicSparkles}
+                  className="text-[10px]"
+                />
+                {tab === "snippets" ? "Snippets" : tab === "history" ? "History" : "AI"}
                 {tab === "history" && history.length > 0 && (
                   <span className="text-2xs bg-brand-500/20 text-brand-400 px-1 rounded-full leading-none">
                     {history.length}
+                  </span>
+                )}
+                {tab === "ai" && (
+                  <span className="text-[9px] bg-brand-500/20 text-brand-400 px-1 rounded leading-none font-medium">
+                    ✦
                   </span>
                 )}
               </button>
@@ -374,6 +611,17 @@ export default function QueryEditorPage() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === "ai" && (
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <AIAssistPanel
+                dbType={dbType}
+                dbVersion={selectedCluster?.db_version ?? ""}
+                clusterId={selectedClusterId}
+                onUseSQL={(sql) => { setQuery(sql); setActiveTab("snippets"); }}
+              />
             </div>
           )}
         </div>

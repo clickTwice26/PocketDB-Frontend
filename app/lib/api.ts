@@ -152,3 +152,108 @@ export const browserApi = {
       { params: { schema, pk_column, pk_value } }
     ).then((r) => r.data),
 };
+
+// ─── AI Agent API ─────────────────────────────────────────────────────────────
+//
+// Uses native fetch + ReadableStream for SSE so we can stream tokens as they
+// arrive from Gemini — axios does not support incremental streaming.
+//
+// Usage:
+//   for await (const chunk of aiApi.sqlAssistStream({...})) {
+//     setResponse(prev => prev + chunk);
+//   }
+
+export interface AISSEChunk {
+  type: "chunk" | "done" | "error";
+  text?: string;
+  message?: string;
+}
+
+async function* _sseStream(url: string, body: object): AsyncGenerator<string> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? `HTTP ${res.status}`);
+  }
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE lines are separated by "\n\n"
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() ?? "";
+
+    for (const part of parts) {
+      const line = part.trim();
+      if (!line.startsWith("data:")) continue;
+      const json = line.slice("data:".length).trim();
+      try {
+        const evt: AISSEChunk = JSON.parse(json);
+        if (evt.type === "chunk" && evt.text) {
+          yield evt.text;
+        } else if (evt.type === "error") {
+          throw new Error(evt.message ?? "AI stream error");
+        }
+        // type === "done" → loop naturally ends
+      } catch {
+        // malformed chunk — skip
+      }
+    }
+  }
+}
+
+export const aiApi = {
+  /** Stream SQL/Redis command generation token-by-token. */
+  sqlAssistStream(params: {
+    prompt: string;
+    clusterId?: string;
+    dbType?: string;
+    dbVersion?: string;
+    schemaContext?: string;
+  }): AsyncGenerator<string> {
+    return _sseStream("/api/v1/ai/sql-assist", {
+      prompt: params.prompt,
+      cluster_id: params.clusterId ?? null,
+      db_type: params.dbType ?? "postgres",
+      db_version: params.dbVersion ?? "",
+      schema_context: params.schemaContext ?? "",
+    });
+  },
+
+  /** Stream multi-turn chat responses. */
+  chatStream(params: {
+    messages: { role: "user" | "model"; content: string }[];
+    clusterId?: string;
+    dbType?: string;
+    dbVersion?: string;
+    clusterName?: string;
+  }): AsyncGenerator<string> {
+    return _sseStream("/api/v1/ai/chat", {
+      messages: params.messages,
+      cluster_id: params.clusterId ?? null,
+      db_type: params.dbType ?? "postgres",
+      db_version: params.dbVersion ?? "",
+      cluster_name: params.clusterName ?? "unknown",
+    });
+  },
+
+  /** Check if AI is configured on the backend. */
+  status: () => api.get("/ai/status").then((r) => r.data) as Promise<{
+    available: boolean;
+    model: string | null;
+    message: string;
+  }>,
+};
+
