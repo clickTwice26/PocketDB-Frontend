@@ -8,11 +8,12 @@ import {
   faExpand, faCompress, faWandMagicSparkles, faArrowUp,
   faStop, faArrowRight, faRotateRight, faRobot,
   faChevronDown, faMagnifyingGlass, faXmark,
-  faCircle, faSquare, faFilePdf,
+  faCircle, faSquare, faFilePdf, faSitemap,
 } from "@fortawesome/free-solid-svg-icons";
 import { useClusters, useExecuteQuery, useDatabases, useSchemaContext } from "@/hooks/useClusters";
 import Topbar from "@/components/layout/Topbar";
 import SchemaBrowserPanel from "@/components/clusters/SchemaBrowserPanel";
+import ERDDiagramModal from "@/components/clusters/ERDDiagramModal";
 import { useUIStore } from "@/store/ui";
 import { cn } from "@/lib/utils";
 import type { ClusterListItem, QueryResult } from "@/types";
@@ -872,6 +873,7 @@ export default function QueryEditorPage() {
   const [sessionRecords, setSessionRecords] = useState<
     { query: string; database: string; clusterName: string; dbType: string; time: Date; result: QueryResult }[]
   >([]);
+  const [showERD, setShowERD] = useState(false);
 
   const zenMode = useUIStore((s) => s.zenMode);
   const toggleZenMode = useUIStore((s) => s.toggleZenMode);
@@ -1217,6 +1219,18 @@ export default function QueryEditorPage() {
             <FontAwesomeIcon icon={faDatabase} className="text-xs" />
             <span className="hidden sm:inline">Browse</span>
           </button>
+
+          {/* ERD button — only when a database is selected (non-Redis) */}
+          {!isRedis && selectedClusterId && selectedDatabase && (
+            <button
+              onClick={() => setShowERD(true)}
+              className="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5 hover:border-brand-500/60 hover:text-brand-400"
+              title={`ERD & Schema diagram for "${selectedDatabase}"`}
+            >
+              <FontAwesomeIcon icon={faSitemap} className="text-xs" />
+              <span className="hidden sm:inline">ERD</span>
+            </button>
+          )}
 
           {/* AI button */}
           <button
@@ -1585,6 +1599,16 @@ export default function QueryEditorPage() {
         )}
       </div>
     </div>
+
+      {/* ── ERD Diagram Modal ─────────────────────────────────────────────── */}
+      {showERD && selectedClusterId && selectedDatabase && (
+        <ERDDiagramModal
+          clusterId={selectedClusterId}
+          database={selectedDatabase}
+          dbType={dbType}
+          onClose={() => setShowERD(false)}
+        />
+      )}
 
       {/* ── Exit confirmation modal ───────────────────────────────────────── */}
       {showExitModal && (

@@ -49,7 +49,7 @@ if (typeof window !== "undefined") {
     if (_handlingUnauthorized) return;
     _handlingUnauthorized = true;
     useAuthStore.setState({ user: null, isInitialized: true });
-    if (!window.location.pathname.startsWith("/login")) {
+    if (!window.location.pathname.startsWith("/login") && window.location.pathname !== "/") {
       try { await authApi.logout(); } catch { /* ignore */ }
       window.location.replace("/login");
     }

@@ -11,9 +11,10 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
-      // Skip for the logout endpoint itself — it doesn't need auth.
+      // Skip for the logout endpoint itself and the landing page.
       const url: string = err.config?.url ?? "";
-      if (!url.includes("/auth/logout") && typeof window !== "undefined") {
+      const onLanding = typeof window !== "undefined" && window.location.pathname === "/";
+      if (!url.includes("/auth/logout") && !onLanding && typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("auth:unauthorized"));
       }
     }
