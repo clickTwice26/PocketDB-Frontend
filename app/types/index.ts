@@ -142,3 +142,66 @@ export interface BrowserData {
   page_size: number;
   error?: string;
 }
+
+// ─── EXPLAIN / Query Plan ─────────────────────────────────────────────────────
+
+export interface ExplainResult {
+  plan_json: unknown;
+  plan_text: string;
+  engine: string;
+  error?: string;
+}
+
+// ─── Index Management ─────────────────────────────────────────────────────────
+
+export interface IndexInfo {
+  index_name: string;
+  table_name: string;
+  definition?: string;
+  is_primary: boolean;
+  is_unique: boolean;
+  size?: string;
+  index_type: string;
+  columns: string[];
+}
+
+// ─── Backup & Restore ─────────────────────────────────────────────────────────
+
+export interface BackupResult {
+  success: boolean;
+  dump: string;
+  engine: string;
+  database: string;
+  error?: string;
+}
+
+export interface RestoreResult {
+  success: boolean;
+  message: string;
+  output?: string;
+  error?: string;
+}
+
+// ─── Transaction Demo ─────────────────────────────────────────────────────────
+
+export interface IsolationLevel {
+  name: string;
+  description: string;
+}
+
+export interface TransactionStepResult {
+  session: string;
+  sql: string;
+  columns: string[];
+  rows: unknown[][];
+  row_count: number;
+  execution_time_ms: number;
+  error?: string;
+}
+
+export interface TransactionDemoResult {
+  results: TransactionStepResult[];
+  isolation_level: string;
+  engine: string;
+  error?: string;
+}

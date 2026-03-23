@@ -11,6 +11,10 @@ import {
   faChartLine,
   faChevronLeft,
   faChevronRight,
+  faSitemap,
+  faListUl,
+  faBoxArchive,
+  faExchangeAlt,
 } from "@fortawesome/free-solid-svg-icons";
 import { useUIStore } from "@/store/ui";
 import {
@@ -24,10 +28,14 @@ import { cn } from "@/lib/utils";
 
 /* ─── Navigation definition ──────────────────────────────────── */
 const NAV_ITEMS: { href: string; icon: IconDefinition; label: string }[] = [
-  { href: "/dashboard/overview",     icon: faChartLine,   label: "Overview"     },
-  { href: "/dashboard/clusters",     icon: faLayerGroup,  label: "Clusters"     },
-  { href: "/dashboard/query-editor", icon: faCode,        label: "Query Editor" },
-  { href: "/dashboard/settings",     icon: faCog,         label: "Settings"     },
+  { href: "/dashboard/overview",          icon: faChartLine,    label: "Overview"         },
+  { href: "/dashboard/clusters",          icon: faLayerGroup,   label: "Clusters"         },
+  { href: "/dashboard/query-editor",      icon: faCode,         label: "Query Editor"     },
+  { href: "/dashboard/explain-plan",      icon: faSitemap,      label: "EXPLAIN Plan"     },
+  { href: "/dashboard/index-manager",     icon: faListUl,       label: "Index Manager"    },
+  { href: "/dashboard/backup-restore",    icon: faBoxArchive,   label: "Backup & Restore" },
+  { href: "/dashboard/transaction-demo",  icon: faExchangeAlt,  label: "Transaction Demo" },
+  { href: "/dashboard/settings",          icon: faCog,          label: "Settings"         },
 ];
 
 /* ─── A single nav link ───────────────────────────────────────── */
