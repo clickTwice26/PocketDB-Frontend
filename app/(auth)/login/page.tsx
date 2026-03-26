@@ -87,7 +87,7 @@ export default function LoginPage() {
           type="button"
           onClick={handleGoogleLogin}
           disabled={googleLoading || loading}
-          className="w-full flex items-center justify-center gap-3 px-4 py-2.5 rounded-lg border border-[#2d3148] bg-[#12141f] hover:bg-[#1a1d2e] text-fg-strong text-sm font-medium transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+          className="w-full flex items-center justify-center gap-3 px-4 py-2.5 rounded-lg border border-surface-border bg-surface-100 hover:bg-surface-200 text-fg-strong text-sm font-medium transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
         >
           {googleLoading
             ? <FontAwesomeIcon icon={faSpinner} className="animate-spin text-fg-muted" />
@@ -98,9 +98,9 @@ export default function LoginPage() {
 
         {/* Divider */}
         <div className="flex items-center gap-3">
-          <div className="flex-1 h-px bg-[#2d3148]" />
+          <div className="flex-1 h-px bg-surface-border" />
           <span className="text-xs text-fg-subtle">or continue with email</span>
-          <div className="flex-1 h-px bg-[#2d3148]" />
+          <div className="flex-1 h-px bg-surface-border" />
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
