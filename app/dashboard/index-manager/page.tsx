@@ -233,6 +233,7 @@ export default function IndexManagerPage() {
                 >
                   <option value="btree">B-Tree (default)</option>
                   <option value="hash">Hash</option>
+                  {dbType === "mysql" && <option value="fulltext">FULLTEXT</option>}
                   {dbType === "postgres" && <option value="gin">GIN</option>}
                   {dbType === "postgres" && <option value="gist">GiST</option>}
                   {dbType === "postgres" && <option value="brin">BRIN</option>}
@@ -364,28 +365,57 @@ export default function IndexManagerPage() {
         {/* Educational info */}
         <div className="rounded-xl border border-surface-border bg-surface-card p-5">
           <h3 className="text-sm font-semibold text-fg-strong mb-3">Index Types Explained</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
-            <div className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/20">
-              <p className="font-semibold text-blue-400 mb-1">B-Tree</p>
-              <p className="text-fg-muted">Default index type. Supports equality and range queries (=, &lt;, &gt;, BETWEEN). Optimal for most use cases.</p>
+          {dbType === "mysql" ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+              <div className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/20">
+                <p className="font-semibold text-blue-400 mb-1">B-Tree (BTREE)</p>
+                <p className="text-fg-muted">Default InnoDB index type. Supports equality (=), range (&lt;, &gt;, BETWEEN), prefix matching (LIKE &apos;abc%&apos;), and ORDER BY optimization.</p>
+              </div>
+              <div className="p-3 rounded-lg bg-purple-500/5 border border-purple-500/20">
+                <p className="font-semibold text-purple-400 mb-1">Hash</p>
+                <p className="text-fg-muted">Memory engine only. Supports exact equality (=) lookups only. Not available for InnoDB — InnoDB uses B-Tree with adaptive hash internally.</p>
+              </div>
+              <div className="p-3 rounded-lg bg-green-500/5 border border-green-500/20">
+                <p className="font-semibold text-green-400 mb-1">FULLTEXT</p>
+                <p className="text-fg-muted">Full-text search on TEXT/VARCHAR columns. Use with MATCH() AGAINST() syntax. Supports natural language and boolean modes. InnoDB supported since MySQL 5.6.</p>
+              </div>
+              <div className="p-3 rounded-lg bg-amber-500/5 border border-amber-500/20">
+                <p className="font-semibold text-amber-400 mb-1">Composite (Multi-Column)</p>
+                <p className="text-fg-muted">An index on multiple columns. MySQL uses the leftmost prefix rule — an index on (a, b, c) can optimize queries on (a), (a, b), or (a, b, c), but not (b) alone.</p>
+              </div>
+              <div className="p-3 rounded-lg bg-cyan-500/5 border border-cyan-500/20">
+                <p className="font-semibold text-cyan-400 mb-1">Covering Index</p>
+                <p className="text-fg-muted">When an index includes all columns needed by a query, MySQL reads from the index only (&quot;Using index&quot; in EXPLAIN). Avoids accessing the actual table data.</p>
+              </div>
+              <div className="p-3 rounded-lg bg-red-500/5 border border-red-500/20">
+                <p className="font-semibold text-red-400 mb-1">PRIMARY KEY (Clustered)</p>
+                <p className="text-fg-muted">In InnoDB, the PRIMARY KEY is a clustered index — row data is stored sorted by PK. Secondary indexes store the PK value to locate rows.</p>
+              </div>
             </div>
-            <div className="p-3 rounded-lg bg-purple-500/5 border border-purple-500/20">
-              <p className="font-semibold text-purple-400 mb-1">Hash</p>
-              <p className="text-fg-muted">Only supports equality comparisons (=). Smaller than B-tree for equality-only columns. Not crash-safe in older PG versions.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+              <div className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/20">
+                <p className="font-semibold text-blue-400 mb-1">B-Tree</p>
+                <p className="text-fg-muted">Default index type. Supports equality and range queries (=, &lt;, &gt;, BETWEEN). Optimal for most use cases.</p>
+              </div>
+              <div className="p-3 rounded-lg bg-purple-500/5 border border-purple-500/20">
+                <p className="font-semibold text-purple-400 mb-1">Hash</p>
+                <p className="text-fg-muted">Only supports equality comparisons (=). Smaller than B-tree for equality-only columns. Not crash-safe in older PG versions.</p>
+              </div>
+              <div className="p-3 rounded-lg bg-green-500/5 border border-green-500/20">
+                <p className="font-semibold text-green-400 mb-1">GIN (Generalized Inverted)</p>
+                <p className="text-fg-muted">PostgreSQL only. Ideal for full-text search, arrays, JSONB containment queries. Multiple values per row.</p>
+              </div>
+              <div className="p-3 rounded-lg bg-amber-500/5 border border-amber-500/20">
+                <p className="font-semibold text-amber-400 mb-1">GiST (Generalized Search Tree)</p>
+                <p className="text-fg-muted">PostgreSQL only. Supports geometric data, range types, and full-text search with different trade-offs than GIN.</p>
+              </div>
+              <div className="p-3 rounded-lg bg-red-500/5 border border-red-500/20">
+                <p className="font-semibold text-red-400 mb-1">BRIN (Block Range)</p>
+                <p className="text-fg-muted">PostgreSQL only. Extremely compact index for naturally ordered data (timestamps, sequences). Very small size.</p>
+              </div>
             </div>
-            <div className="p-3 rounded-lg bg-green-500/5 border border-green-500/20">
-              <p className="font-semibold text-green-400 mb-1">GIN (Generalized Inverted)</p>
-              <p className="text-fg-muted">PostgreSQL only. Ideal for full-text search, arrays, JSONB containment queries. Multiple values per row.</p>
-            </div>
-            <div className="p-3 rounded-lg bg-amber-500/5 border border-amber-500/20">
-              <p className="font-semibold text-amber-400 mb-1">GiST (Generalized Search Tree)</p>
-              <p className="text-fg-muted">PostgreSQL only. Supports geometric data, range types, and full-text search with different trade-offs than GIN.</p>
-            </div>
-            <div className="p-3 rounded-lg bg-red-500/5 border border-red-500/20">
-              <p className="font-semibold text-red-400 mb-1">BRIN (Block Range)</p>
-              <p className="text-fg-muted">PostgreSQL only. Extremely compact index for naturally ordered data (timestamps, sequences). Very small size.</p>
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </>

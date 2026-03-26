@@ -33,6 +33,8 @@ export interface AuthUser {
   email: string;
   name: string;
   is_active: boolean;
+  avatar_url?: string | null;
+  google_id?: string | null;
   created_at: string;
 }
 

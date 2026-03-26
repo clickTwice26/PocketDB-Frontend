@@ -25,12 +25,19 @@ const SESSION_COLORS = {
   B: { text: "text-green-400", bg: "bg-green-500/10", border: "border-green-500/30", label: "Session B" },
 };
 
-/* ─── Preset demos ──────────────────────────────────────────── */
-const PRESETS = [
+/* ─── Preset demos (engine-aware) ───────────────────────────── */
+const getSetupSql = (dbType: string, inserts: string) => {
+  const createTable = dbType === "mysql"
+    ? "CREATE TABLE IF NOT EXISTS txn_demo (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100), balance INT)"
+    : "CREATE TABLE IF NOT EXISTS txn_demo (id SERIAL PRIMARY KEY, name TEXT, balance INT)";
+  return `${createTable};\nDELETE FROM txn_demo;\n${inserts}`;
+};
+
+const getPresets = (dbType: string) => [
   {
     name: "Dirty Read Demo",
     description: "Session A updates a row but doesn't commit. Session B tries to read it.",
-    setupSql: "CREATE TABLE IF NOT EXISTS txn_demo (id SERIAL PRIMARY KEY, name TEXT, balance INT);\nDELETE FROM txn_demo;\nINSERT INTO txn_demo (name, balance) VALUES ('Alice', 1000);",
+    setupSql: getSetupSql(dbType, "INSERT INTO txn_demo (name, balance) VALUES ('Alice', 1000);"),
     steps: [
       { session: "A", sql: "UPDATE txn_demo SET balance = 500 WHERE name = 'Alice';" },
       { session: "B", sql: "SELECT * FROM txn_demo WHERE name = 'Alice';" },
@@ -39,7 +46,7 @@ const PRESETS = [
   {
     name: "Non-Repeatable Read",
     description: "Session B reads twice; Session A commits a change between the reads.",
-    setupSql: "CREATE TABLE IF NOT EXISTS txn_demo (id SERIAL PRIMARY KEY, name TEXT, balance INT);\nDELETE FROM txn_demo;\nINSERT INTO txn_demo (name, balance) VALUES ('Bob', 2000);",
+    setupSql: getSetupSql(dbType, "INSERT INTO txn_demo (name, balance) VALUES ('Bob', 2000);"),
     steps: [
       { session: "B", sql: "SELECT * FROM txn_demo WHERE name = 'Bob';" },
       { session: "A", sql: "UPDATE txn_demo SET balance = 1500 WHERE name = 'Bob';" },
@@ -49,7 +56,7 @@ const PRESETS = [
   {
     name: "Phantom Read",
     description: "Session B counts rows; Session A inserts a new row between from B's two queries.",
-    setupSql: "CREATE TABLE IF NOT EXISTS txn_demo (id SERIAL PRIMARY KEY, name TEXT, balance INT);\nDELETE FROM txn_demo;\nINSERT INTO txn_demo (name, balance) VALUES ('Alice', 1000), ('Bob', 2000);",
+    setupSql: getSetupSql(dbType, "INSERT INTO txn_demo (name, balance) VALUES ('Alice', 1000), ('Bob', 2000);"),
     steps: [
       { session: "B", sql: "SELECT COUNT(*) FROM txn_demo;" },
       { session: "A", sql: "INSERT INTO txn_demo (name, balance) VALUES ('Charlie', 3000);" },
@@ -59,7 +66,7 @@ const PRESETS = [
   {
     name: "Lost Update",
     description: "Both sessions read the same row, then update. One update may be lost.",
-    setupSql: "CREATE TABLE IF NOT EXISTS txn_demo (id SERIAL PRIMARY KEY, name TEXT, balance INT);\nDELETE FROM txn_demo;\nINSERT INTO txn_demo (name, balance) VALUES ('Alice', 1000);",
+    setupSql: getSetupSql(dbType, "INSERT INTO txn_demo (name, balance) VALUES ('Alice', 1000);"),
     steps: [
       { session: "A", sql: "SELECT * FROM txn_demo WHERE name = 'Alice';" },
       { session: "B", sql: "SELECT * FROM txn_demo WHERE name = 'Alice';" },
@@ -88,6 +95,9 @@ export default function TransactionDemoPage() {
   const [result, setResult] = useState<TransactionDemoResult | null>(null);
   const [settingUp, setSettingUp] = useState(false);
 
+  const dbType = selectedCluster?.db_type || "postgres";
+  const presets = useMemo(() => getPresets(dbType), [dbType]);
+
   const fetchLevels = async (cid: string) => {
     try {
       const res = await transactionApi.isolationLevels(cid);
@@ -115,7 +125,7 @@ export default function TransactionDemoPage() {
     setSteps((prev) => prev.map((s, i) => i === idx ? { ...s, [field]: value } : s));
   };
 
-  const loadPreset = async (preset: typeof PRESETS[0]) => {
+  const loadPreset = async (preset: ReturnType<typeof getPresets>[0]) => {
     setSteps(preset.steps.map((s) => ({ ...s })));
 
     // Run setup SQL
@@ -230,7 +240,7 @@ export default function TransactionDemoPage() {
             )}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {PRESETS.map((preset) => (
+            {presets.map((preset) => (
               <button
                 key={preset.name}
                 onClick={() => loadPreset(preset)}
@@ -430,7 +440,7 @@ export default function TransactionDemoPage() {
               </tbody>
             </table>
           </div>
-          <p className="text-2xs text-fg-subtle mt-2">* PostgreSQL&apos;s REPEATABLE READ uses MVCC snapshots that also prevent phantom reads in practice, unlike the SQL standard definition.</p>
+          <p className="text-2xs text-fg-subtle mt-2">* PostgreSQL&apos;s REPEATABLE READ uses MVCC snapshots that also prevent phantom reads in practice. MySQL/InnoDB&apos;s REPEATABLE READ uses gap locks and MVCC to prevent most phantom reads, unlike the SQL standard definition.</p>
         </div>
       </div>
     </>

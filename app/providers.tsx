@@ -63,7 +63,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
         <AuthBootstrap />
         {children}
         <Toaster
-        position="bottom-right"
+        position="top-right"
         toastOptions={{
           style: {
             background: "#1a1d27",

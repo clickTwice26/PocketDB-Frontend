@@ -10,7 +10,8 @@ import {
   faChevronDown, faMagnifyingGlass, faXmark,
   faCircle, faSquare, faFilePdf, faSitemap,
 } from "@fortawesome/free-solid-svg-icons";
-import { useClusters, useExecuteQuery, useDatabases, useSchemaContext } from "@/hooks/useClusters";
+import { useQueryClient } from "@tanstack/react-query";
+import { useClusters, useExecuteQuery, useDatabases, useSchemaContext, clusterKeys } from "@/hooks/useClusters";
 import Topbar from "@/components/layout/Topbar";
 import SchemaBrowserPanel from "@/components/clusters/SchemaBrowserPanel";
 import ERDDiagramModal from "@/components/clusters/ERDDiagramModal";
@@ -239,6 +240,7 @@ function AIAssistPanel({
   const { data: schemaData, isLoading: schemaLoading, refetch: refetchSchema } = useSchemaContext(clusterId, database);
   const schemaText = schemaData?.schema_text ?? "";
   const tableCount = schemaData?.table_count ?? 0;
+  const schemaError = schemaData?.error ?? "";
 
   const isRedis = dbType === "redis";
 
@@ -465,13 +467,22 @@ function AIAssistPanel({
             <FontAwesomeIcon icon={faSpinner} className="animate-spin text-xs" />
             Loading schema…
           </span>
+        ) : schemaError ? (
+          <span className="text-2xs text-amber-400 flex items-center gap-1.5">
+            <FontAwesomeIcon icon={faTriangleExclamation} className="text-xs" />
+            Schema fetch failed
+            <button onClick={() => refetchSchema()} className="underline hover:text-amber-300 ml-1">retry</button>
+          </span>
         ) : schemaText ? (
           <span className="text-2xs text-green-500 flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
             Schema loaded · <strong>{tableCount}</strong> table{tableCount !== 1 ? "s" : ""} in &ldquo;{database}&rdquo;
           </span>
         ) : (
-          <span className="text-2xs text-fg-subtle">No tables yet in &ldquo;{database}&rdquo;</span>
+          <span className="text-2xs text-fg-subtle flex items-center gap-1.5">
+            No tables yet in &ldquo;{database}&rdquo;
+            <button onClick={() => refetchSchema()} className="underline hover:text-fg-base ml-1">refresh</button>
+          </span>
         )}
         <span className="ml-auto text-2xs bg-brand-500/10 text-brand-400 px-1.5 py-0.5 rounded font-medium">Gemini</span>
       </div>
@@ -859,6 +870,7 @@ function DatabasePicker({
 export default function QueryEditorPage() {
   const { data: clusters = [] } = useClusters("running");
   const { mutate: execQuery, isPending } = useExecuteQuery();
+  const queryClient = useQueryClient();
 
   const selectedClusterId = useUIStore((s) => s.selectedClusterId) ?? "";
   const setSelectedClusterId = useUIStore((s) => s.setSelectedClusterId);
@@ -998,6 +1010,10 @@ export default function QueryEditorPage() {
         onSuccess: (data) => {
           setResult(data);
           setHistory((h) => [{ query: sql, time: new Date(), result: data }, ...h.slice(0, 29)]);
+          // Refresh the schema cache so the AI assistant sees the latest tables/columns
+          if (selectedDatabase) {
+            queryClient.invalidateQueries({ queryKey: clusterKeys.schema(selectedClusterId, selectedDatabase) });
+          }
           // Append to session recording if active
           setSessionRecords((prev) => {
             if (!isRecording) return prev;
@@ -1013,7 +1029,7 @@ export default function QueryEditorPage() {
         },
       },
     );
-  }, [selectedClusterId, query, selectedDatabase, execQuery, isRecording, selectedCluster, dbType]);
+  }, [selectedClusterId, query, selectedDatabase, execQuery, isRecording, selectedCluster, dbType, queryClient]);
 
   const handleCopy = useCallback(() => {
     if (!result) return;

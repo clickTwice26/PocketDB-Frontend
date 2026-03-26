@@ -116,10 +116,12 @@ export function useExecuteQuery() {
 }
 
 export function useSchemaContext(clusterId: string, database: string) {
-  return useQuery<{ schema_text: string; table_count: number }>({
+  return useQuery<{ schema_text: string; table_count: number; error?: string }>({
     queryKey: clusterKeys.schema(clusterId, database),
     queryFn: () => browserApi.getFullSchema(clusterId, database),
     enabled: !!clusterId && !!database,
     staleTime: 0,
+    refetchOnMount: "always",
+    refetchInterval: 10_000,
   });
 }

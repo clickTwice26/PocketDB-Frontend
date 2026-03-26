@@ -4,7 +4,7 @@ import type { NextRequest } from "next/server";
 const PUBLIC_PREFIX_PATHS = ["/login", "/register"];
 const COOKIE_NAME  = "pocketdb_token";
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Landing page — always accessible, never redirect

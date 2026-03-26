@@ -15,6 +15,7 @@ import {
   faListUl,
   faBoxArchive,
   faExchangeAlt,
+  faShareNodes,
 } from "@fortawesome/free-solid-svg-icons";
 import { useUIStore } from "@/store/ui";
 import {
@@ -35,6 +36,7 @@ const NAV_ITEMS: { href: string; icon: IconDefinition; label: string }[] = [
   { href: "/dashboard/index-manager",     icon: faListUl,       label: "Index Manager"    },
   { href: "/dashboard/backup-restore",    icon: faBoxArchive,   label: "Backup & Restore" },
   { href: "/dashboard/transaction-demo",  icon: faExchangeAlt,  label: "Transaction Demo" },
+  { href: "/dashboard/erd-generator",     icon: faShareNodes,   label: "ER Diagram"       },
   { href: "/dashboard/settings",          icon: faCog,          label: "Settings"         },
 ];
 

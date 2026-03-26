@@ -296,14 +296,34 @@ export default function BackupRestorePage() {
         {/* Info */}
         <div className="rounded-xl border border-surface-border bg-surface-card p-5">
           <h3 className="text-sm font-semibold text-fg-strong mb-3">About Backup & Restore</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-fg-muted">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-fg-muted">
             <div className="p-3 rounded-lg bg-green-500/5 border border-green-500/20">
-              <p className="font-semibold text-green-400 mb-1">pg_dump / mysqldump</p>
-              <p>Creates a logical SQL dump — portable, human-readable SQL statements that recreate schema + data. This is the standard backup method for development and small-to-medium databases.</p>
+              <p className="font-semibold text-green-400 mb-1">
+                {selectedCluster?.db_type === "mysql" ? "mysqldump" : "pg_dump"}
+              </p>
+              <p>
+                {selectedCluster?.db_type === "mysql"
+                  ? "Creates a logical SQL dump with CREATE TABLE + INSERT statements. Uses --single-transaction for consistent InnoDB snapshots without locking tables."
+                  : "Creates a logical SQL dump — portable, human-readable SQL statements that recreate schema + data. Standard backup for development and small-to-medium databases."}
+              </p>
             </div>
             <div className="p-3 rounded-lg bg-amber-500/5 border border-amber-500/20">
               <p className="font-semibold text-amber-400 mb-1">Best Practices</p>
-              <p>In production, combine logical backups with WAL archiving (PostgreSQL) or binary logs (MySQL) for point-in-time recovery. Always test restores regularly. Store backups off-site.</p>
+              <p>
+                {selectedCluster?.db_type === "mysql"
+                  ? "For production MySQL, use --single-transaction with InnoDB tables for consistent backups. Combine with binary log replication for point-in-time recovery. Always test restores regularly."
+                  : "In production, combine logical backups with WAL archiving (PostgreSQL) for point-in-time recovery. Always test restores regularly. Store backups off-site."}
+              </p>
+            </div>
+            <div className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/20">
+              <p className="font-semibold text-blue-400 mb-1">
+                {selectedCluster?.db_type === "mysql" ? "MySQL Specifics" : "PostgreSQL Specifics"}
+              </p>
+              <p>
+                {selectedCluster?.db_type === "mysql"
+                  ? "InnoDB supports transactional backups. Character set (utf8mb4) and collation are preserved in the dump. Use --routines to include stored procedures and functions."
+                  : "pg_dump supports custom format (-Fc) for compressed, parallel restore. Use pg_restore for custom-format dumps. Supports selective schema/data-only backups."}
+              </p>
             </div>
           </div>
         </div>
