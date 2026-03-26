@@ -16,8 +16,10 @@ import {
   faBoxArchive,
   faExchangeAlt,
   faShareNodes,
+  faUserShield,
 } from "@fortawesome/free-solid-svg-icons";
 import { useUIStore } from "@/store/ui";
+import { useAuthStore } from "@/store/auth";
 import {
   Tooltip,
   TooltipContent,
@@ -114,6 +116,7 @@ function SidebarContent({
 }) {
   const pathname = usePathname();
   const { setSidebarOpen, sidebarOpen } = useUIStore();
+  const user = useAuthStore((s) => s.user);
 
   return (
     <div className="flex flex-col h-full overflow-hidden select-none">
@@ -192,6 +195,16 @@ function SidebarContent({
             onClick={onNavClick}
           />
         ))}
+        {user?.role === "admin" && (
+          <NavItem
+            href="/dashboard/admin"
+            icon={faUserShield}
+            label="User Management"
+            active={pathname.startsWith("/dashboard/admin")}
+            collapsed={collapsed}
+            onClick={onNavClick}
+          />
+        )}
       </nav>
 
       {/* ── Footer ── */}

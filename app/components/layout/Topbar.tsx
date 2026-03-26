@@ -236,9 +236,18 @@ export default function Topbar({ title, subtitle }: TopbarProps) {
                 userMenuOpen && "border-brand-500/60 ring-1 ring-brand-500/30"
               )}
             >
-              <span className="w-6 h-6 rounded-md bg-brand-500/20 text-brand-300 flex items-center justify-center text-xs font-bold shrink-0 select-none">
-                {initials}
-              </span>
+              {user.avatar_url ? (
+                <img
+                  src={user.avatar_url}
+                  alt={user.name}
+                  referrerPolicy="no-referrer"
+                  className="w-6 h-6 rounded-md object-cover shrink-0"
+                />
+              ) : (
+                <span className="w-6 h-6 rounded-md bg-brand-500/20 text-brand-300 flex items-center justify-center text-xs font-bold shrink-0 select-none">
+                  {initials}
+                </span>
+              )}
               <span className="hidden sm:inline max-w-[120px] truncate">{user.name}</span>
               <FontAwesomeIcon
                 icon={faChevronDown}

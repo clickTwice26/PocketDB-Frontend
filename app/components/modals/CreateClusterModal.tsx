@@ -4,10 +4,11 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faXmark, faDatabase, faKey, faSpinner, faCheck,
   faLayerGroup, faCircleNodes, faBolt,
-  faEye, faEyeSlash, faPlus, faServer,
+  faEye, faEyeSlash, faPlus, faServer, faLock,
 } from "@fortawesome/free-solid-svg-icons";
 import { useCreateCluster } from "@/hooks/useClusters";
 import { useUIStore } from "@/store/ui";
+import { useAuthStore } from "@/store/auth";
 import { cn } from "@/lib/utils";
 
 type DbType = "postgres" | "mysql" | "redis";
@@ -77,10 +78,13 @@ function makeForm(type: DbType) {
 
 export default function CreateClusterModal() {
   const { createModalOpen, setCreateModalOpen } = useUIStore();
+  const user = useAuthStore((s) => s.user);
   const { mutate: createCluster, isPending } = useCreateCluster();
   const [engine, setEngine]           = useState<DbType>("postgres");
   const [form, setForm]               = useState(makeForm("postgres"));
   const [showPassword, setShowPassword] = useState(false);
+
+  const canCreate = user?.role === "subscriber" || user?.role === "admin";
 
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -105,6 +109,33 @@ export default function CreateClusterModal() {
   };
 
   if (!createModalOpen) return null;
+
+  // Normal users see an upgrade prompt instead of the creation form
+  if (!canCreate) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setCreateModalOpen(false)} />
+        <div className="relative bg-surface-50 border border-surface-border rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col p-8 items-center text-center gap-4">
+          <div className="w-14 h-14 rounded-2xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-center">
+            <FontAwesomeIcon icon={faLock} className="text-brand-400 text-2xl" />
+          </div>
+          <div>
+            <h2 className="text-base font-bold text-fg-strong">Subscriber Required</h2>
+            <p className="text-xs text-fg-subtle mt-1.5 leading-relaxed">
+              Creating clusters is available to <span className="text-brand-400 font-semibold">Subscriber</span> and <span className="text-brand-400 font-semibold">Admin</span> accounts.<br />
+              Ask an admin to upgrade your role.
+            </p>
+          </div>
+          <button
+            onClick={() => setCreateModalOpen(false)}
+            className="btn-primary text-sm px-6 py-2 w-full"
+          >
+            Got it
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const sel = ENGINES.find((e) => e.type === engine)!;
 

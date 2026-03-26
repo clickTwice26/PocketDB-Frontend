@@ -32,6 +32,7 @@ export interface AuthUser {
   id: string;
   email: string;
   name: string;
+  role: "normal" | "subscriber" | "admin";
   is_active: boolean;
   avatar_url?: string | null;
   google_id?: string | null;
@@ -263,6 +264,14 @@ export const aiApi = {
     model: string | null;
     message: string;
   }>,
+};
+
+// ─── Admin API ───────────────────────────────────────────────────────────────
+
+export const adminApi = {
+  listUsers: () => api.get<AuthUser[]>("/admin/users").then((r) => r.data),
+  updateRole: (userId: string, role: "normal" | "subscriber" | "admin") =>
+    api.patch<AuthUser>(`/admin/users/${userId}/role`, { role }).then((r) => r.data),
 };
 
 // ─── EXPLAIN / Query Plan API ────────────────────────────────────────────────
