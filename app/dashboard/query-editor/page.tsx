@@ -9,6 +9,7 @@ import {
   faStop, faArrowRight, faRotateRight, faRobot,
   faChevronDown, faMagnifyingGlass, faXmark,
   faCircle, faSquare, faFilePdf, faSitemap,
+  faChartBar, faTableCells, faChartLine, faHashtag,
 } from "@fortawesome/free-solid-svg-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { useClusters, useExecuteQuery, useDatabases, useSchemaContext, clusterKeys } from "@/hooks/useClusters";
@@ -18,7 +19,7 @@ import ERDDiagramModal from "@/components/clusters/ERDDiagramModal";
 import { useUIStore } from "@/store/ui";
 import { cn } from "@/lib/utils";
 import type { ClusterListItem, QueryResult } from "@/types";
-import { aiApi } from "@/lib/api";
+import { aiApi, browserApi } from "@/lib/api";
 import toast from "react-hot-toast";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -583,6 +584,314 @@ function AIAssistPanel({
   );
 }
 
+// ─── Interactive Mode Panel ───────────────────────────────────────────────────
+
+/** Parse the first affected table name from a SQL statement */
+function parseAffectedTable(sql: string): string | null {
+  const s = sql.trim().replace(/\s+/g, " ");
+  const patterns = [
+    /^(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|TRUNCATE(?:\s+TABLE)?)\s+(?:"?(\w+)"?\.)?"?(\w+)"?/i,
+    /^CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+(?:"?(\w+)"?\.)?"?(\w+)"?/i,
+    /^DROP\s+TABLE(?:\s+IF\s+EXISTS)?\s+(?:"?(\w+)"?\.)?"?(\w+)"?/i,
+    /^ALTER\s+TABLE\s+(?:"?(\w+)"?\.)?"?(\w+)"?/i,
+    /^SELECT\s+.+?\s+FROM\s+(?:"?(\w+)"?\.)?"?(\w+)"?/i,
+  ];
+  for (const re of patterns) {
+    const m = re.exec(s);
+    if (m) return m[2] ?? m[1] ?? null;
+  }
+  return null;
+}
+
+function classifyQuery(sql: string): "select" | "insert" | "update" | "delete" | "ddl" | "other" {
+  const s = sql.trim().toUpperCase();
+  if (s.startsWith("SELECT")) return "select";
+  if (s.startsWith("INSERT")) return "insert";
+  if (s.startsWith("UPDATE")) return "update";
+  if (s.startsWith("DELETE") || s.startsWith("TRUNCATE")) return "delete";
+  if (/^(CREATE|DROP|ALTER|RENAME)/.test(s)) return "ddl";
+  return "other";
+}
+
+function InteractiveModePanel({
+  clusterId,
+  database,
+  dbType,
+  lastQuery,
+  lastResult,
+  isRunning,
+}: {
+  clusterId: string;
+  database: string;
+  dbType: string;
+  lastQuery: string;
+  lastResult: QueryResult | null;
+  isRunning: boolean;
+}) {
+  const [tables, setTables] = useState<{ name: string; row_count?: number; schema?: string }[]>([]);
+  const [tablesLoading, setTablesLoading] = useState(false);
+  const [focusedTable, setFocusedTable] = useState<string | null>(null);
+  const [tableData, setTableData] = useState<QueryResult | null>(null);
+  const [tableDataLoading, setTableDataLoading] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
+  const isRedis = dbType === "redis";
+
+  // Load table list when cluster/database changes or refreshKey changes
+  useEffect(() => {
+    if (!clusterId || !database || isRedis) {
+      setTables([]);
+      return;
+    }
+    setTablesLoading(true);
+    browserApi.listTables(clusterId, database)
+      .then((res: { name: string; row_count?: number; schema?: string }[] | { tables?: { name: string; row_count?: number; schema?: string }[] }) => {
+        const list = Array.isArray(res) ? res : (res?.tables ?? []);
+        setTables(list);
+        setLastRefreshedAt(new Date());
+      })
+      .catch(() => setTables([]))
+      .finally(() => setTablesLoading(false));
+  }, [clusterId, database, isRedis, refreshKey]);
+
+  // Auto-detect affected table and load its data after each query
+  useEffect(() => {
+    if (!lastQuery || !lastResult || !clusterId || !database || isRedis) return;
+    // Refresh table list on any DDL or DML
+    const kind = classifyQuery(lastQuery);
+    if (kind !== "other") {
+      setRefreshKey((k) => k + 1);
+    }
+    // Load data for the affected table
+    const tbl = parseAffectedTable(lastQuery);
+    if (tbl) {
+      setFocusedTable(tbl);
+      setTableDataLoading(true);
+      browserApi.getData(clusterId, database, tbl, { page_size: 20 })
+        .then((res: { columns?: string[]; rows?: unknown[][]; total_rows?: number }) => setTableData({
+          columns: res.columns ?? [],
+          rows: res.rows ?? [],
+          row_count: res.total_rows ?? res.rows?.length ?? 0,
+          execution_time_ms: 0,
+          query: `SELECT * FROM ${tbl}`,
+          error: null,
+        }))
+        .catch(() => setTableData(null))
+        .finally(() => setTableDataLoading(false));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastResult]);
+
+  const handleTableClick = (tableName: string) => {
+    if (!clusterId || !database) return;
+    setFocusedTable(tableName);
+    setTableDataLoading(true);
+    browserApi.getData(clusterId, database, tableName, { page_size: 20 })
+      .then((res: { columns?: string[]; rows?: unknown[][]; total_rows?: number }) => setTableData({
+        columns: res.columns ?? [],
+        rows: res.rows ?? [],
+        row_count: res.total_rows ?? res.rows?.length ?? 0,
+        execution_time_ms: 0,
+        query: `SELECT * FROM ${tableName}`,
+        error: null,
+      }))
+      .catch(() => setTableData(null))
+      .finally(() => setTableDataLoading(false));
+  };
+
+  const queryKind = lastQuery ? classifyQuery(lastQuery) : null;
+  const kindColor: Record<string, string> = {
+    select: "text-blue-400 bg-blue-500/10 border-blue-500/20",
+    insert: "text-green-400 bg-green-500/10 border-green-500/20",
+    update: "text-yellow-400 bg-yellow-500/10 border-yellow-500/20",
+    delete: "text-red-400 bg-red-500/10 border-red-500/20",
+    ddl:    "text-purple-400 bg-purple-500/10 border-purple-500/20",
+    other:  "text-fg-subtle bg-surface-100 border-surface-border",
+  };
+
+  if (!clusterId || !database) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-3 text-center px-5 pt-8">
+        <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center">
+          <FontAwesomeIcon icon={faChartLine} className="text-brand-400 text-lg" />
+        </div>
+        <p className="text-xs font-semibold text-fg-base">Interactive Mode</p>
+        <p className="text-2xs text-fg-subtle leading-relaxed">
+          Select a cluster and database to see live table changes as you execute queries.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+
+      {/* Header strip */}
+      <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-surface-border bg-surface-50/60">
+        <FontAwesomeIcon icon={faDatabase} className="text-brand-400 text-xs shrink-0" />
+        <span className="text-2xs font-semibold text-fg-base truncate">{database}</span>
+        {lastRefreshedAt && (
+          <span className="ml-auto text-2xs text-fg-subtle whitespace-nowrap">
+            {lastRefreshedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+          </span>
+        )}
+        <button
+          onClick={() => setRefreshKey((k) => k + 1)}
+          className="shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-surface-100 text-fg-subtle hover:text-fg-base transition-colors"
+          title="Refresh tables"
+        >
+          <FontAwesomeIcon icon={faRotateRight} className={cn("text-xs", tablesLoading && "animate-spin")} />
+        </button>
+      </div>
+
+      {/* Last query badge */}
+      {lastQuery && (
+        <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-surface-border">
+          {isRunning
+            ? <FontAwesomeIcon icon={faSpinner} className="text-brand-400 text-xs animate-spin shrink-0" />
+            : queryKind && (
+              <span className={cn("text-2xs px-1.5 py-0.5 rounded border font-mono font-semibold uppercase shrink-0", kindColor[queryKind])}>
+                {queryKind}
+              </span>
+            )
+          }
+          <code className="text-2xs text-fg-muted font-mono truncate flex-1">
+            {lastQuery.trim().replace(/\s+/g, " ")}
+          </code>
+          {lastResult && !lastResult.error && (
+            <span className="text-2xs text-green-400 shrink-0 whitespace-nowrap">
+              {lastResult.row_count} row{lastResult.row_count !== 1 ? "s" : ""}
+            </span>
+          )}
+          {lastResult?.error && (
+            <span className="text-2xs text-red-400 shrink-0">error</span>
+          )}
+        </div>
+      )}
+
+      {/* Table list */}
+      <div className="shrink-0 border-b border-surface-border">
+        <div className="px-3 py-1.5 flex items-center gap-1">
+          <span className="text-2xs font-semibold text-fg-subtle uppercase tracking-wide">Tables</span>
+          {tables.length > 0 && (
+            <span className="ml-1 text-2xs bg-surface-100 text-fg-subtle px-1.5 rounded-full">{tables.length}</span>
+          )}
+        </div>
+        {tablesLoading && tables.length === 0 ? (
+          <div className="flex items-center gap-2 px-3 pb-2">
+            <FontAwesomeIcon icon={faSpinner} className="text-brand-400 text-xs animate-spin" />
+            <span className="text-2xs text-fg-subtle">Loading tables…</span>
+          </div>
+        ) : tables.length === 0 ? (
+          <p className="px-3 pb-2 text-2xs text-fg-subtle">No tables yet</p>
+        ) : (
+          <div className="flex flex-wrap gap-1 px-3 pb-2 max-h-24 overflow-y-auto">
+            {tables.map((t) => {
+              const affected = lastQuery ? parseAffectedTable(lastQuery) === t.name : false;
+              return (
+                <button
+                  key={t.name}
+                  onClick={() => handleTableClick(t.name)}
+                  className={cn(
+                    "inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-2xs font-mono transition-all",
+                    focusedTable === t.name
+                      ? "bg-brand-500/15 border-brand-500/40 text-brand-400"
+                      : affected
+                      ? "bg-green-500/10 border-green-500/30 text-green-400 animate-pulse"
+                      : "bg-surface-100 border-surface-border text-fg-muted hover:border-brand-500/40 hover:text-fg-base",
+                  )}
+                >
+                  <FontAwesomeIcon icon={faTableCells} className="text-xs opacity-70" />
+                  {t.name}
+                  {t.row_count !== undefined && (
+                    <span className="opacity-60">{t.row_count}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Focused table data */}
+      <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+        {!focusedTable ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center px-4">
+            <FontAwesomeIcon icon={faTableCells} className="text-fg-subtle/30 text-2xl" />
+            <p className="text-2xs text-fg-subtle">Click a table above or run a query to see live data</p>
+          </div>
+        ) : (
+          <>
+            {/* Table data header */}
+            <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-surface-border bg-surface-50">
+              <FontAwesomeIcon icon={faTableCells} className="text-brand-400 text-xs" />
+              <span className="text-2xs font-semibold text-fg-base font-mono">{focusedTable}</span>
+              {tableData && (
+                <span className="text-2xs text-fg-subtle ml-1">{tableData.row_count} rows</span>
+              )}
+              {tableDataLoading && (
+                <FontAwesomeIcon icon={faSpinner} className="text-brand-400 text-xs animate-spin ml-1" />
+              )}
+              <button
+                onClick={() => handleTableClick(focusedTable)}
+                className="ml-auto w-5 h-5 flex items-center justify-center rounded hover:bg-surface-100 text-fg-subtle hover:text-fg-base transition-colors"
+                title="Refresh table data"
+              >
+                <FontAwesomeIcon icon={faRotateRight} className="text-xs" />
+              </button>
+            </div>
+
+            {/* Table data body */}
+            <div className="flex-1 overflow-auto min-h-0">
+              {tableDataLoading && !tableData ? (
+                <div className="h-full flex items-center justify-center">
+                  <FontAwesomeIcon icon={faSpinner} className="text-brand-400 animate-spin" />
+                </div>
+              ) : tableData && tableData.columns.length > 0 ? (
+                <table className="w-full text-xs border-collapse">
+                  <thead className="sticky top-0 z-10 bg-surface-100">
+                    <tr>
+                      {tableData.columns.map((col) => (
+                        <th key={col} className="text-left px-2.5 py-1.5 text-fg-subtle font-semibold border-b border-surface-border whitespace-nowrap text-2xs">
+                          {col}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tableData.rows.map((row, ri) => (
+                      <tr key={ri} className="border-b border-surface-border/30 hover:bg-surface-50 transition-colors">
+                        {row.map((cell, ci) => (
+                          <td key={ci} className="px-2.5 py-1.5 font-mono text-fg-base max-w-[120px] truncate text-2xs" title={String(cell ?? "")}>
+                            {cell === null
+                              ? <span className="text-fg-subtle italic">NULL</span>
+                              : String(cell)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                    {tableData.rows.length === 0 && (
+                      <tr>
+                        <td colSpan={tableData.columns.length} className="px-3 py-4 text-center text-2xs text-fg-subtle">
+                          Table is empty
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="h-full flex items-center justify-center">
+                  <p className="text-2xs text-fg-subtle">No data</p>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── ClusterPicker ───────────────────────────────────────────────────────────
 
 function ClusterPicker({
@@ -878,7 +1187,7 @@ export default function QueryEditorPage() {
   const [result, setResult]     = useState<QueryResult | null>(null);
   const [history, setHistory]   = useState<{ query: string; time: Date; result: QueryResult }[]>(() => []);
   const [copied, setCopied]     = useState(false);
-  const [rightPanel, setRightPanel] = useState<null | "history" | "ai" | "browser">(null);
+  const [rightPanel, setRightPanel] = useState<null | "history" | "ai" | "browser" | "interactive">(null);
   const [showExitModal, setShowExitModal] = useState(false);
   const [selectedDatabase, setSelectedDatabase] = useState<string>("");
   const [isRecording, setIsRecording] = useState(false);
@@ -886,6 +1195,72 @@ export default function QueryEditorPage() {
     { query: string; database: string; clusterName: string; dbType: string; time: Date; result: QueryResult }[]
   >([]);
   const [showERD, setShowERD] = useState(false);
+  const [lastRunQuery, setLastRunQuery] = useState<string>("");
+  const [runCount, setRunCount] = useState(0);
+
+  // ── Resize state ────────────────────────────────────────────────────────────
+  // editorHeightPct: fraction of the center column taken by the editor (0.2–0.85)
+  const [editorHeightPct, setEditorHeightPct] = useState(0.38);
+  // rightPanelWidth: pixel width of the right panel
+  const [rightPanelWidth, setRightPanelWidth] = useState<number | null>(null);
+  const mainAreaRef   = useRef<HTMLDivElement>(null);
+  const centerColRef  = useRef<HTMLDivElement>(null);
+  const isDraggingV   = useRef(false); // vertical (editor/results splitter)
+  const isDraggingH   = useRef(false); // horizontal (right panel splitter)
+
+  const startVerticalDrag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDraggingV.current = true;
+    const col = centerColRef.current;
+    if (!col) return;
+    const onMove = (ev: MouseEvent) => {
+      if (!isDraggingV.current) return;
+      const rect = col.getBoundingClientRect();
+      const pct = (ev.clientY - rect.top) / rect.height;
+      setEditorHeightPct(Math.min(0.85, Math.max(0.15, pct)));
+    };
+    const onUp = () => {
+      isDraggingV.current = false;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, []);
+
+  const startHorizontalDrag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDraggingH.current = true;
+    const area = mainAreaRef.current;
+    if (!area) return;
+    const onMove = (ev: MouseEvent) => {
+      if (!isDraggingH.current) return;
+      const rect = area.getBoundingClientRect();
+      const w = rect.right - ev.clientX;
+      setRightPanelWidth(Math.min(900, Math.max(240, w)));
+    };
+    const onUp = () => {
+      isDraggingH.current = false;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, []);
+  // ────────────────────────────────────────────────────────────────────────────
+
+  const openPanel = useCallback((panel: "history" | "ai" | "browser" | "interactive" | null) => {
+    setRightPanel(panel);
+    setRightPanelWidth(null); // reset to default width for each panel type
+  }, []);
 
   const zenMode = useUIStore((s) => s.zenMode);
   const toggleZenMode = useUIStore((s) => s.toggleZenMode);
@@ -999,22 +1374,27 @@ export default function QueryEditorPage() {
     setQuery(DEFAULT_QUERY[c?.db_type ?? "postgres"] ?? DEFAULT_QUERY.postgres);
     setResult(null);
     setSelectedDatabase("");
+    setLastRunQuery("");
+    setRunCount(0);
   };
 
   const handleRun = useCallback((sqlOverride?: string) => {
     const sql = sqlOverride ?? query;
     if (!selectedClusterId || !sql.trim()) return;
+    const runStartTime = Date.now();
+    setLastRunQuery(sql);
+    setRunCount((c) => c + 1);
+
     execQuery(
       { clusterId: selectedClusterId, query: sql, database: selectedDatabase || undefined },
       {
         onSuccess: (data) => {
+          void (Date.now() - runStartTime); // track elapsed for future use
           setResult(data);
           setHistory((h) => [{ query: sql, time: new Date(), result: data }, ...h.slice(0, 29)]);
-          // Refresh the schema cache so the AI assistant sees the latest tables/columns
           if (selectedDatabase) {
             queryClient.invalidateQueries({ queryKey: clusterKeys.schema(selectedClusterId, selectedDatabase) });
           }
-          // Append to session recording if active
           setSessionRecords((prev) => {
             if (!isRecording) return prev;
             return [...prev, {
@@ -1207,7 +1587,7 @@ export default function QueryEditorPage() {
         <div className="ml-auto flex items-center gap-2">
           {/* History button */}
           <button
-            onClick={() => setRightPanel((p) => p === "history" ? null : "history")}
+            onClick={() => openPanel(rightPanel === "history" ? null : "history")}
             className={cn(
               "btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5",
               rightPanel === "history" && "bg-brand-500/10 border-brand-500/40 text-brand-400",
@@ -1225,7 +1605,7 @@ export default function QueryEditorPage() {
 
           {/* Browser button */}
           <button
-            onClick={() => setRightPanel((p) => p === "browser" ? null : "browser")}
+            onClick={() => openPanel(rightPanel === "browser" ? null : "browser")}
             className={cn(
               "btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5",
               rightPanel === "browser" && "bg-brand-500/10 border-brand-500/40 text-brand-400",
@@ -1250,7 +1630,7 @@ export default function QueryEditorPage() {
 
           {/* AI button */}
           <button
-            onClick={() => setRightPanel((p) => p === "ai" ? null : "ai")}
+            onClick={() => openPanel(rightPanel === "ai" ? null : "ai")}
             className={cn(
               "btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5",
               rightPanel === "ai" && "bg-brand-500/10 border-brand-500/40 text-brand-400",
@@ -1260,6 +1640,24 @@ export default function QueryEditorPage() {
             <FontAwesomeIcon icon={faRobot} className="text-xs" />
             <span className="hidden sm:inline">AI</span>
             <span className="text-xs bg-brand-500/20 text-brand-400 px-1 rounded leading-none font-medium">✨</span>
+          </button>
+
+          {/* Interactive Mode button */}
+          <button
+            onClick={() => openPanel(rightPanel === "interactive" ? null : "interactive")}
+            className={cn(
+              "btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5",
+              rightPanel === "interactive" && "bg-brand-500/10 border-brand-500/40 text-brand-400",
+            )}
+            title="Interactive Mode — live visual output"
+          >
+            <FontAwesomeIcon icon={faChartLine} className="text-xs" />
+            <span className="hidden sm:inline">Live</span>
+            {runCount > 0 && (
+              <span className="text-2xs bg-brand-500/20 text-brand-400 px-1.5 rounded-full leading-none tabular-nums">
+                {runCount}
+              </span>
+            )}
           </button>
 
           {/* Record / Stop+Export buttons */}
@@ -1371,13 +1769,13 @@ export default function QueryEditorPage() {
       )}
 
       {/* ── Main area ─────────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-hidden flex min-h-0">
+      <div ref={mainAreaRef} className="flex-1 overflow-hidden flex min-h-0">
 
         {/* ── Editor + Results ────────────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        <div ref={centerColRef} className="flex-1 flex flex-col overflow-hidden min-w-0">
 
           {/* Editor */}
-          <div className="flex flex-col border-b border-surface-border" style={{ flex: "0 0 38%" }}>
+          <div className="flex flex-col border-b border-surface-border" style={{ flex: `0 0 ${editorHeightPct * 100}%` }}>
             <div className="shrink-0 flex items-center justify-between px-3 py-2 border-b border-surface-border bg-surface-50">
               <div className="flex items-center gap-1.5">
                 <FontAwesomeIcon icon={isRedis ? faTerminal : faCode} className="text-brand-400 text-xs" />
@@ -1405,6 +1803,15 @@ export default function QueryEditorPage() {
                   : "Write your SQL here… (Ctrl + Enter to run)"
               }
             />
+          </div>
+
+          {/* ── Vertical drag handle ─── */}
+          <div
+            onMouseDown={startVerticalDrag}
+            className="shrink-0 h-[5px] cursor-row-resize group flex items-center justify-center hover:bg-brand-500/20 transition-colors"
+            title="Drag to resize editor"
+          >
+            <div className="w-12 h-[3px] rounded-full bg-surface-border group-hover:bg-brand-500/50 transition-colors" />
           </div>
 
           {/* Results */}
@@ -1485,30 +1892,61 @@ export default function QueryEditorPage() {
 
         {/* ── Right panel: History / AI / Browser ─────────────────────── */}
         {rightPanel && (
-          <div className={cn(
-            "shrink-0 flex flex-col border-l border-surface-border bg-surface overflow-hidden",
-            rightPanel === "browser" ? "w-[680px] xl:w-[760px]" : "w-80 xl:w-96",
-          )}>
+        <div
+          className="shrink-0 flex flex-row border-l border-surface-border bg-surface overflow-hidden"
+          style={{
+            width: rightPanelWidth
+              ? rightPanelWidth
+              : rightPanel === "browser" ? 680 : 320,
+          }}
+        >
+          {/* Horizontal drag handle */}
+          <div
+            onMouseDown={startHorizontalDrag}
+            className="w-[5px] shrink-0 cursor-col-resize group flex items-center justify-center hover:bg-brand-500/20 transition-colors h-full"
+            title="Drag to resize panel"
+          >
+            <div className="w-[3px] h-12 rounded-full bg-surface-border group-hover:bg-brand-500/50 transition-colors" />
+          </div>
+
+          {/* Panel inner */}
+          <div className="flex-1 flex flex-col overflow-hidden min-w-0">
             {/* Panel header */}
             <div className="shrink-0 flex items-center justify-between px-3 py-2.5 border-b border-surface-border bg-surface-50">
               <span className="flex items-center gap-2 text-xs font-semibold text-fg-base">
                 <FontAwesomeIcon
-                  icon={rightPanel === "history" ? faClockRotateLeft : rightPanel === "browser" ? faDatabase : faRobot}
+                  icon={
+                    rightPanel === "history"     ? faClockRotateLeft :
+                    rightPanel === "browser"     ? faDatabase :
+                    rightPanel === "interactive" ? faChartLine :
+                    faRobot
+                  }
                   className="text-brand-400 text-xs"
                 />
-                {rightPanel === "history" ? "Query History" : rightPanel === "browser" ? "Schema Browser" : "AI Assistant"}
+                {rightPanel === "history"     ? "Query History"    :
+                 rightPanel === "browser"     ? "Schema Browser"   :
+                 rightPanel === "interactive" ? "Interactive Mode" :
+                 "AI Assistant"}
               </span>
               <div className="flex items-center gap-1.5">
                 {rightPanel !== "browser" && (
                   <button
-                    onClick={() => setRightPanel(rightPanel === "history" ? "ai" : "history")}
+                    onClick={() => openPanel(rightPanel === "history" ? "ai" : rightPanel === "ai" ? "interactive" : "history")}
                     className="text-2xs text-fg-subtle hover:text-fg-base transition-colors px-1.5 py-0.5 rounded hover:bg-surface-100"
                   >
-                    Switch to {rightPanel === "history" ? "AI" : "History"}
+                    Switch to {rightPanel === "history" ? "AI" : rightPanel === "ai" ? "Live" : "History"}
+                  </button>
+                )}
+                {rightPanel === "interactive" && runCount > 0 && (
+                  <button
+                    onClick={() => { setLastRunQuery(""); setRunCount(0); }}
+                    className="text-2xs text-fg-subtle hover:text-fg-base transition-colors px-1.5 py-0.5 rounded hover:bg-surface-100"
+                  >
+                    Reset
                   </button>
                 )}
                 <button
-                  onClick={() => setRightPanel(null)}
+                  onClick={() => openPanel(null)}
                   className="w-6 h-6 flex items-center justify-center rounded-md text-fg-subtle hover:text-fg-base hover:bg-surface-100 transition-colors"
                   title="Close panel"
                 >
@@ -1581,7 +2019,22 @@ export default function QueryEditorPage() {
                 />
               </div>
             )}
+
+            {/* Interactive Mode content */}
+            {rightPanel === "interactive" && (
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <InteractiveModePanel
+                  clusterId={selectedClusterId ?? ""}
+                  database={selectedDatabase}
+                  dbType={dbType}
+                  lastQuery={lastRunQuery}
+                  lastResult={result}
+                  isRunning={isPending}
+                />
+              </div>
+            )}
           </div>
+        </div>
         )}
       </div>
 
