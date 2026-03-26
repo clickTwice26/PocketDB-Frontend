@@ -1700,26 +1700,7 @@ export default function QueryEditorPage() {
           >
             <FontAwesomeIcon icon={zenMode ? faCompress : faExpand} />
           </button>
-          <span className="hidden md:inline-flex items-center px-1.5 py-0.5 rounded border border-surface-border bg-surface text-2xs text-fg-subtle font-mono tracking-tight">
-            ⌘↵
-          </span>
-          <button
-            onClick={() => { setQuery(""); setResult(null); }}
-            className="btn-secondary text-xs py-1.5 px-3"
-          >
-            <FontAwesomeIcon icon={faTrash} />
-            <span className="hidden sm:inline">Clear</span>
-          </button>
-          <button
-            onClick={() => handleRun()}
-            disabled={isPending || !selectedClusterId || !query.trim()}
-            className="btn-primary text-xs py-1.5 px-4"
-          >
-            {isPending
-              ? <FontAwesomeIcon icon={faSpinner} className="animate-spin" />
-              : <FontAwesomeIcon icon={faPlay} />}
-            {isRedis ? "Run" : "Run Query"}
-          </button>
+
         </div>
       </div>
 
@@ -1803,6 +1784,26 @@ export default function QueryEditorPage() {
                   : "Write your SQL here… (Ctrl + Enter to run)"
               }
             />
+            {/* ── Editor action bar ── */}
+            <div className="shrink-0 flex items-center justify-end gap-2 px-3 py-2 border-t border-surface-border bg-surface-50">
+              <button
+                onClick={() => { setQuery(""); setResult(null); }}
+                className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"
+              >
+                <FontAwesomeIcon icon={faTrash} />
+                <span>Clear</span>
+              </button>
+              <button
+                onClick={() => handleRun()}
+                disabled={isPending || !selectedClusterId || !query.trim()}
+                className="btn-primary text-xs py-1.5 px-4 flex items-center gap-1.5"
+              >
+                {isPending
+                  ? <FontAwesomeIcon icon={faSpinner} className="animate-spin" />
+                  : <FontAwesomeIcon icon={faPlay} />}
+                {isRedis ? "Run" : "Run Query"}
+              </button>
+            </div>
           </div>
 
           {/* ── Vertical drag handle ─── */}
