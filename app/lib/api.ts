@@ -258,6 +258,24 @@ export const aiApi = {
     });
   },
 
+  /**
+   * Stream DDL (CREATE TABLE statements) generated from a natural-language
+   * description. Pass existingSchema to let the AI extend an existing design.
+   */
+  erdGenerateStream(params: {
+    description: string;
+    existingSchema?: string;
+    imageBase64?: string;
+    imageMimeType?: string;
+  }): AsyncGenerator<string> {
+    return _sseStream("/api/v1/ai/erd-generate", {
+      description: params.description,
+      existing_schema: params.existingSchema ?? "",
+      image_base64: params.imageBase64 ?? "",
+      image_mime_type: params.imageMimeType ?? "image/png",
+    });
+  },
+
   /** Check if AI is configured on the backend. */
   status: () => api.get("/ai/status").then((r) => r.data) as Promise<{
     available: boolean;

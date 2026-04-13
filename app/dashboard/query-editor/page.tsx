@@ -220,6 +220,8 @@ function AIAssistPanel({
   clusterId,
   clusterName,
   database,
+  messages,
+  setMessages,
   onUseSQL,
   onExecute,
 }: {
@@ -228,11 +230,12 @@ function AIAssistPanel({
   clusterId: string;
   clusterName: string;
   database: string;
+  messages: AIChatMessage[];
+  setMessages: React.Dispatch<React.SetStateAction<AIChatMessage[]>>;
   onUseSQL: (sql: string) => void;
   onExecute: (sql: string) => void;
 }) {
   const [prompt, setPrompt] = useState("");
-  const [messages, setMessages] = useState<AIChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [copiedIdx, setCopiedIdx] = useState<string | null>(null);
   const abortRef = useRef<{ abort: boolean }>({ abort: false });
@@ -253,9 +256,15 @@ function AIAssistPanel({
   }, [messages]);
 
   // Reset chat when cluster or database changes
+  const prevClusterRef = useRef(clusterId);
+  const prevDatabaseRef = useRef(database);
   useEffect(() => {
-    setMessages([]);
-  }, [clusterId, database]);
+    if (prevClusterRef.current !== clusterId || prevDatabaseRef.current !== database) {
+      setMessages([]);
+      prevClusterRef.current = clusterId;
+      prevDatabaseRef.current = database;
+    }
+  }, [clusterId, database, setMessages]);
 
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim() || !clusterId || streaming) return;
@@ -394,7 +403,7 @@ function AIAssistPanel({
           {parts.map((part, pi) => {
             if (part.type === "text") {
               return (
-                <p key={pi} className="text-xs text-fg-muted leading-relaxed whitespace-pre-wrap break-words">
+                <p key={pi} className="text-xs text-fg-base leading-relaxed whitespace-pre-wrap break-words">
                   {msg.streaming
                     ? <StreamingText content={part.content} />
                     : part.content
@@ -498,10 +507,10 @@ function AIAssistPanel({
               </div>
               <div>
                 <p className="text-xs font-semibold text-fg-base">PocketDB AI Assistant</p>
-                <p className="text-2xs text-fg-subtle">Powered by Gemini</p>
+                <p className="text-2xs text-fg-muted">Powered by Gemini</p>
               </div>
             </div>
-            <p className="text-xs text-fg-subtle leading-relaxed mb-3">
+            <p className="text-xs text-fg-muted leading-relaxed mb-3">
               {schemaText
                 ? `I know your full schema — ${tableCount} table${tableCount !== 1 ? "s" : ""} in "${database}". Ask anything!`
                 : isRedis
@@ -513,7 +522,7 @@ function AIAssistPanel({
                 <button
                   key={ex}
                   onClick={() => setPrompt(ex)}
-                  className="text-left text-xs text-fg-subtle hover:text-fg-base px-3 py-2 rounded-lg hover:bg-surface-100 border border-surface-border hover:border-brand-500/40 transition-colors"
+                  className="text-left text-xs text-fg-muted hover:text-fg-base px-3 py-2 rounded-lg hover:bg-surface-100 border border-surface-border hover:border-brand-500/40 transition-colors"
                 >
                   <FontAwesomeIcon icon={faArrowRight} className="mr-2 text-brand-400 text-xs" />
                   {ex}
@@ -1197,6 +1206,7 @@ export default function QueryEditorPage() {
   const [showERD, setShowERD] = useState(false);
   const [lastRunQuery, setLastRunQuery] = useState<string>("");
   const [runCount, setRunCount] = useState(0);
+  const [aiMessages, setAiMessages] = useState<AIChatMessage[]>([]);
 
   // ── Resize state ────────────────────────────────────────────────────────────
   // editorHeightPct: fraction of the center column taken by the editor (0.2–0.85)
@@ -2004,6 +2014,8 @@ export default function QueryEditorPage() {
                   clusterId={selectedClusterId}
                   clusterName={selectedCluster?.name ?? ""}
                   database={selectedDatabase}
+                  messages={aiMessages}
+                  setMessages={setAiMessages}
                   onUseSQL={(sql) => { setQuery(sql); toast.success("SQL inserted into editor"); }}
                   onExecute={(sql) => { setQuery(sql); handleRun(sql); }}
                 />

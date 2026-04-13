@@ -26,10 +26,17 @@ import {
   faEyeSlash,
   faSitemap,
   faCircleInfo,
+  faWandMagicSparkles,
+  faXmark,
+  faStop,
+  faPlay,
+  faArrowRight,
+  faRobot,
 } from "@fortawesome/free-solid-svg-icons";
-import { browserApi, clusterApi } from "@/lib/api";
+import { browserApi, clusterApi, aiApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import Topbar from "@/components/layout/Topbar";
+import toast from "react-hot-toast";
 import type {
   BrowserColumn,
   BrowserForeignKey,
@@ -124,6 +131,396 @@ function escapeXml(str: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+// ─── DDL → TableSchema parser ──────────────────────────────────────────────────
+// Parses PostgreSQL CREATE TABLE DDL into TableSchema objects for the canvas.
+function parseDDLToSchemas(raw: string): TableSchema[] {
+  const schemas: TableSchema[] = [];
+
+  // Strip markdown code fences the AI may emit despite instructions
+  const ddl = raw
+    .replace(/^```[\w]*\n?/gim, "")
+    .replace(/^```\s*$/gim, "");
+
+  // Match each CREATE TABLE block
+  const tableRegex =
+    /CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+(?:"?[\w]+"?\.)?"?(\w+)"?\s*\(([^;]+)\)/gis;
+
+  let m: RegExpExecArray | null;
+  while ((m = tableRegex.exec(ddl)) !== null) {
+    const tableName = m[1];
+    const body = m[2];
+
+    const columns: BrowserColumn[] = [];
+    const primary_keys: string[] = [];
+    const foreign_keys: BrowserForeignKey[] = [];
+
+    // Detect inline PRIMARY KEY constraint
+    const pkConstraint = body.match(
+      /PRIMARY\s+KEY\s*\(([^)]+)\)/i
+    );
+    if (pkConstraint) {
+      pkConstraint[1]
+        .split(",")
+        .map((s) => s.replace(/"/g, "").trim())
+        .forEach((k) => { if (k) primary_keys.push(k); });
+    }
+
+    // Detect FOREIGN KEY constraints
+    const fkRegex =
+      /FOREIGN\s+KEY\s*\(\s*"?(\w+)"?\s*\)\s*REFERENCES\s+"?(\w+)"?\s*\(\s*"?(\w+)"?\s*\)/gi;
+    let fkM: RegExpExecArray | null;
+    while ((fkM = fkRegex.exec(body)) !== null) {
+      foreign_keys.push({
+        constraint_name: `fk_${tableName}_${fkM[1]}`,
+        column_name: fkM[1],
+        foreign_table: fkM[2],
+        foreign_column: fkM[3],
+      });
+    }
+
+    // Parse column definitions (lines that are not constraints)
+    const lines = body.split(",").map((l) => l.trim()).filter(Boolean);
+    for (const line of lines) {
+      // Skip constraint lines
+      if (/^(PRIMARY|FOREIGN|UNIQUE|CHECK|CONSTRAINT)\s/i.test(line)) continue;
+
+      // column_name  data_type  [optional modifiers]
+      const colMatch = line.match(/^"?(\w+)"?\s+([\w\s()[\],']+?)(?:\s+DEFAULT\s+\S+|\s+NOT\s+NULL|\s+NULL|\s+REFERENCES|\s+UNIQUE|\s*$)/i);
+      if (!colMatch) continue;
+
+      const colName = colMatch[1];
+      const rawType = colMatch[2].trim().toLowerCase().split(/\s+/)[0];
+
+      const isInlinePK = /PRIMARY\s+KEY/i.test(line);
+      const isInlineFK = /REFERENCES/i.test(line);
+      const isNullable = !/NOT\s+NULL/i.test(line) && !isInlinePK ? "YES" : "NO";
+
+      if (isInlinePK && !primary_keys.includes(colName)) {
+        primary_keys.push(colName);
+      }
+
+      if (isInlineFK) {
+        const inlineFKMatch = line.match(/REFERENCES\s+"?(\w+)"?\s*\(\s*"?(\w+)"?\s*\)/i);
+        if (inlineFKMatch) {
+          foreign_keys.push({
+            constraint_name: `fk_${tableName}_${colName}`,
+            column_name: colName,
+            foreign_table: inlineFKMatch[1],
+            foreign_column: inlineFKMatch[2],
+          });
+        }
+      }
+
+      columns.push({
+        name: colName,
+        data_type: rawType,
+        udt_name: rawType,
+        is_nullable: isNullable,
+        column_default: null,
+        character_maximum_length: null,
+      });
+    }
+
+    if (tableName && columns.length > 0) {
+      schemas.push({ name: tableName, schemaName: "public", columns, primary_keys, foreign_keys });
+    }
+  }
+
+  return schemas;
+}
+
+// ─── AI ERD Design Panel ──────────────────────────────────────────────────────
+function AIERDPanel({
+  existingTables,
+  onApplySchemas,
+  onClose,
+}: {
+  existingTables: TableSchema[];
+  onApplySchemas: (schemas: TableSchema[], mode: "replace" | "merge") => void;
+  onClose: () => void;
+}) {
+  const [prompt, setPrompt] = useState("");
+  const [ddl, setDdl] = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const [parsed, setParsed] = useState<TableSchema[]>([]);
+  const abortRef = useRef<{ abort: boolean }>({ abort: false });
+  const ddlRef = useRef("");
+
+  // Image upload / paste state
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [imageMimeType, setImageMimeType] = useState("image/png");
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const loadImageFile = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      const [header, b64] = dataUrl.split(",");
+      const mime = header.match(/:(.*?);/)?.[1] ?? "image/png";
+      setImageBase64(b64);
+      setImageMimeType(mime);
+      setImagePreviewUrl(dataUrl);
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  const clearImage = useCallback(() => {
+    setImageBase64(null);
+    setImagePreviewUrl(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, []);
+
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) { e.preventDefault(); loadImageFile(file); }
+        break;
+      }
+    }
+  }, [loadImageFile]);
+
+  const existingDDL = useMemo(() => {
+    if (existingTables.length === 0) return "";
+    return existingTables.map((t) => {
+      const cols = t.columns.map((c) => {
+        const isPK = t.primary_keys.includes(c.name);
+        const isFK = t.foreign_keys.find((f) => f.column_name === c.name);
+        let def = `  ${c.name} ${c.udt_name ?? c.data_type}`;
+        if (isPK) def += " PRIMARY KEY";
+        if (c.is_nullable === "NO" && !isPK) def += " NOT NULL";
+        if (isFK) def += ` REFERENCES ${isFK.foreign_table}(${isFK.foreign_column})`;
+        return def;
+      }).join(",\n");
+      return `CREATE TABLE ${t.name} (\n${cols}\n);`;
+    }).join("\n\n");
+  }, [existingTables]);
+
+  const handleGenerate = useCallback(async () => {
+    if ((!prompt.trim() && !imageBase64) || streaming) return;
+    setDdl("");
+    setParsed([]);
+    ddlRef.current = "";
+    setStreaming(true);
+    abortRef.current.abort = false;
+
+    try {
+      const stream = aiApi.erdGenerateStream({
+        description: prompt.trim(),
+        existingSchema: existingDDL,
+        imageBase64: imageBase64 ?? undefined,
+        imageMimeType: imageMimeType,
+      });
+      for await (const chunk of stream) {
+        if (abortRef.current.abort) break;
+        ddlRef.current += chunk;
+        setDdl(ddlRef.current);
+      }
+      // Parse accumulated DDL into table schemas
+      const schemas = parseDDLToSchemas(ddlRef.current);
+      setParsed(schemas);
+      if (schemas.length === 0) {
+        // Check if AI returned an informational comment (e.g. "cannot remove tables")
+        const commentOnly = /^[\s\-\-]+/.test(ddlRef.current.trim()) &&
+          !/CREATE\s+TABLE/i.test(ddlRef.current);
+        if (commentOnly) {
+          const msg = ddlRef.current.replace(/^--\s*/gm, "").trim().split("\n")[0];
+          toast.error(msg || "AI returned no CREATE TABLE statements");
+        } else {
+          toast.error("No tables could be parsed from the generated DDL");
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "AI request failed";
+      toast.error(msg);
+    } finally {
+      setStreaming(false);
+    }
+  }, [prompt, streaming, existingDDL, imageBase64, imageMimeType]);
+
+  const handleStop = () => { abortRef.current.abort = true; };
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Header */}
+      <div className="shrink-0 flex items-center justify-between px-3 py-2.5 border-b border-surface-border bg-surface-50">
+        <div className="flex items-center gap-2">
+          <FontAwesomeIcon icon={faRobot} className="text-brand-400 text-xs" />
+          <span className="text-xs font-semibold text-fg-base">AI Schema Designer</span>
+          <span className="text-2xs bg-brand-500/10 text-brand-400 px-1.5 py-0.5 rounded font-medium">Gemini</span>
+        </div>
+        <button
+          onClick={onClose}
+          className="w-6 h-6 flex items-center justify-center rounded-md text-fg-subtle hover:text-fg-base hover:bg-surface-100 transition-colors"
+        >
+          <FontAwesomeIcon icon={faXmark} className="text-xs" />
+        </button>
+      </div>
+
+      {/* Body */}
+      <div className="flex-1 overflow-y-auto flex flex-col gap-3 p-3 min-h-0">
+
+        {/* Existing context badge */}
+        {existingTables.length > 0 && (
+          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-brand-500/8 border border-brand-500/20 text-2xs text-brand-300">
+            <FontAwesomeIcon icon={faDatabase} className="text-xs shrink-0" />
+            AI can see your {existingTables.length} existing table{existingTables.length !== 1 ? "s" : ""} — add, remove or modify any of them
+          </div>
+        )}
+
+        {/* Prompt examples */}
+        {!ddl && !streaming && (
+          <div className="grid gap-1.5">
+            <p className="text-2xs text-fg-muted font-medium mb-0.5">Try an example:</p>
+            {[
+              "E-commerce platform with users, products, orders and reviews",
+              "Blog with posts, comments, tags and author profiles",
+              "Add a notifications table linked to users",
+              "Remove the region table",
+              "Add an email column to the users table",
+            ].map((ex) => (
+              <button
+                key={ex}
+                onClick={() => setPrompt(ex)}
+                className="text-left text-xs text-fg-muted hover:text-fg-base px-3 py-2 rounded-lg hover:bg-surface-100 border border-surface-border hover:border-brand-500/40 transition-colors"
+              >
+                <FontAwesomeIcon icon={faArrowRight} className="mr-2 text-brand-400 text-xs" />
+                {ex}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Generated DDL */}
+        {(ddl || streaming) && (
+          <div className="rounded-xl border border-surface-border bg-[#0d1117] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-3 py-1.5 border-b border-surface-border/50 bg-[#161b22]">
+              <span className="text-2xs text-fg-muted font-mono uppercase tracking-wide">PostgreSQL DDL</span>
+              {streaming
+                ? <span className="text-2xs text-brand-400 animate-pulse">Generating…</span>
+                : parsed.length > 0
+                  ? <span className="text-2xs text-green-400">{parsed.length} table{parsed.length !== 1 ? "s" : ""} detected</span>
+                  : <span className="text-2xs text-amber-400">No tables parsed</span>
+              }
+            </div>
+            <pre className="p-3 text-2xs font-mono text-green-300 overflow-auto max-h-64 leading-relaxed whitespace-pre-wrap break-words">
+              {ddl}
+              {streaming && <span className="inline-block w-[2px] h-[12px] bg-brand-400 ml-[2px] align-text-bottom rounded-[1px] animate-pulse" />}
+            </pre>
+          </div>
+        )}
+      </div>
+
+      {/* Apply buttons */}
+      {parsed.length > 0 && !streaming && (
+        <div className="shrink-0 border-t border-surface-border px-3 py-2.5 flex gap-2">
+          <button
+            onClick={() => { onApplySchemas(parsed, "replace"); toast.success(`Canvas updated — ${parsed.length} table${parsed.length !== 1 ? "s" : ""}`); }}
+            className="flex-1 btn-primary text-xs py-1.5 flex items-center justify-center gap-1.5"
+          >
+            <FontAwesomeIcon icon={faPlay} className="text-xs" />
+            Apply to Canvas
+          </button>
+        </div>
+      )}
+
+      {/* Input */}
+      <div className="shrink-0 border-t border-surface-border p-2 flex flex-col gap-2">
+
+        {/* Image preview */}
+        {imagePreviewUrl && (
+          <div className="relative rounded-xl overflow-hidden border border-brand-500/30 bg-surface-100">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={imagePreviewUrl}
+              alt="Uploaded schema"
+              className="w-full max-h-36 object-contain"
+            />
+            <button
+              onClick={clearImage}
+              title="Remove image"
+              className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded-full bg-black/60 hover:bg-red-500/80 text-white text-xs transition-colors"
+            >
+              <FontAwesomeIcon icon={faXmark} />
+            </button>
+            <div className="absolute bottom-1 left-2 text-2xs text-white/70 bg-black/50 rounded px-1.5 py-0.5">
+              Image attached — AI will analyze it
+            </div>
+          </div>
+        )}
+
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) loadImageFile(file);
+          }}
+        />
+
+        <div className="relative">
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (!streaming) handleGenerate();
+              }
+            }}
+            onPaste={handlePaste}
+            placeholder={imageBase64 ? "Add a description (optional) or just generate from image…" : "Describe your database schema… or paste / upload an image"}
+            disabled={streaming}
+            rows={3}
+            className="w-full bg-surface-100 border border-surface-border rounded-xl px-3 pt-2.5 pb-8 text-xs text-fg-base placeholder:text-fg-subtle resize-none focus:outline-none focus:border-brand-500 disabled:opacity-50 transition-colors"
+          />
+          <div className="absolute bottom-2 right-2 flex items-center gap-1">
+            {/* Upload image button */}
+            {!streaming && (
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                title="Upload image (ERD screenshot, whiteboard photo)"
+                className={`flex items-center justify-center w-6 h-6 rounded-lg transition-colors ${imageBase64 ? "bg-brand-500/20 text-brand-300 border border-brand-500/40" : "hover:bg-surface-200 text-fg-subtle hover:text-fg-base"}`}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                  <path fillRule="evenodd" d="M1 5.25A2.25 2.25 0 0 1 3.25 3h13.5A2.25 2.25 0 0 1 19 5.25v9.5A2.25 2.25 0 0 1 16.75 17H3.25A2.25 2.25 0 0 1 1 14.75v-9.5Zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 0 0 .75-.75v-2.69l-2.22-2.219a.75.75 0 0 0-1.06 0l-1.91 1.909-.47-.47a.75.75 0 0 0-1.06 0L6.53 13.091 2.5 11.061Zm0-1.56 3.56 1.78a.75.75 0 0 0 .85-.12l2.5-2.5a.75.75 0 0 1 1.06 0l.47.47 1.91-1.909a2.25 2.25 0 0 1 3.182 0L18.5 13.06V5.25a.75.75 0 0 0-.75-.75H3.25a.75.75 0 0 0-.75.75v5ZM7 7.75a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 0 1 2.5 0Z" clipRule="evenodd" />
+                </svg>
+              </button>
+            )}
+            {streaming ? (
+              <button
+                onClick={handleStop}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs transition-colors"
+              >
+                <FontAwesomeIcon icon={faStop} className="text-xs" />
+                Stop
+              </button>
+            ) : (
+              <button
+                onClick={handleGenerate}
+                disabled={!prompt.trim() && !imageBase64}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-brand-600 hover:bg-brand-500 disabled:opacity-40 text-white text-xs font-medium transition-colors"
+              >
+                <FontAwesomeIcon icon={faWandMagicSparkles} className="text-xs" />
+                Generate
+              </button>
+            )}
+          </div>
+          <div className="absolute bottom-2 left-3">
+            <span className="text-xs text-fg-subtle">↵ generate · paste image</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─── SVG Export ────────────────────────────────────────────────────────────────
@@ -324,6 +721,7 @@ export default function ERDGeneratorPage() {
 
   // ── UI state ─────────────────────────────────────────────────────────────────
   const [filterOpen,       setFilterOpen]       = useState(false);
+  const [aiPanelOpen,      setAiPanelOpen]      = useState(false);
   const [hiddenTables,     setHiddenTables]     = useState<Set<string>>(new Set());
   const [view,             setView]             = useState<"erd" | "schema">("erd");
   const [showCardinality,  setShowCardinality]  = useState(true);
@@ -581,6 +979,23 @@ export default function ERDGeneratorPage() {
   const showAllTables  = useCallback(() => setHiddenTables(new Set()), []);
   const hideAllTables  = useCallback(() => setHiddenTables(new Set(tables.map((t) => t.name))), [tables]);
 
+  // ── Apply AI-generated schemas to canvas ──────────────────────────────────────
+  const applyAISchemas = useCallback((schemas: TableSchema[], mode: "replace" | "merge") => {
+    const merged = mode === "merge"
+      ? [
+          ...tables.filter((t) => !schemas.some((s) => s.name === t.name)),
+          ...schemas,
+        ]
+      : schemas;
+    setTables(merged);
+    setPositions(autoLayout(merged));
+    setHiddenTables(new Set());
+    const z = 0.78;
+    const p = { x: 32, y: 32 };
+    setZoom(z); zoomRef.current = z;
+    setPan(p);  panRef.current  = p;
+  }, [tables]);
+
   // ── SVG Export ────────────────────────────────────────────────────────────────
   const exportSVG = useCallback(() => {
     if (visibleTables.length === 0) return;
@@ -813,6 +1228,21 @@ export default function ERDGeneratorPage() {
         {/* Spacer */}
         <div className="flex-1" />
 
+        {/* AI Design button */}
+        <button
+          onClick={() => { setAiPanelOpen((v) => !v); setFilterOpen(false); }}
+          className={cn(
+            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors",
+            aiPanelOpen
+              ? "border-brand-500/50 bg-brand-500/10 text-brand-300"
+              : "border-brand-500/30 bg-brand-500/5 text-brand-400 hover:bg-brand-500/10 hover:border-brand-500/50"
+          )}
+          title="AI Schema Designer — generate ERD from a description"
+        >
+          <FontAwesomeIcon icon={faWandMagicSparkles} className="text-xs" />
+          AI Design
+        </button>
+
         {/* Filter toggle */}
         {tables.length > 0 && (
           <button
@@ -860,8 +1290,8 @@ export default function ERDGeneratorPage() {
         {/* ── Canvas / Schema area ─────────────────────────────────────────── */}
         <div className="flex-1 overflow-hidden relative select-none">
 
-          {/* Empty state – no cluster/db selected */}
-          {!selectedClusterId && (
+          {/* Empty state – no tables loaded */}
+          {!selectedClusterId && tables.length === 0 && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 text-center px-8">
               <div className="w-20 h-20 rounded-2xl bg-brand-500/8 border border-brand-500/15 flex items-center justify-center">
                 <FontAwesomeIcon icon={faShareNodes} className="text-brand-400 text-3xl" />
@@ -1180,6 +1610,20 @@ export default function ERDGeneratorPage() {
             </div>
           )}
         </div>
+
+        {/* ── AI Design Panel ───────────────────────────────────────────────── */}
+        {aiPanelOpen && (
+          <div className="w-80 shrink-0 border-l border-surface-border bg-surface flex flex-col overflow-hidden">
+            <AIERDPanel
+              existingTables={tables}
+              onApplySchemas={(schemas, mode) => {
+                applyAISchemas(schemas, mode);
+                setView("erd");
+              }}
+              onClose={() => setAiPanelOpen(false)}
+            />
+          </div>
+        )}
 
         {/* ── Filter Panel ─────────────────────────────────────────────────── */}
         {filterOpen && tables.length > 0 && (
