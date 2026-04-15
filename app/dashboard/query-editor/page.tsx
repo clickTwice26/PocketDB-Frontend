@@ -214,6 +214,237 @@ function StreamingText({ content }: { content: string }) {
   );
 }
 
+// ─── SQL Autocomplete ─────────────────────────────────────────────────────────
+
+const SQL_KEYWORDS = [
+  "SELECT", "FROM", "WHERE", "JOIN", "LEFT JOIN", "RIGHT JOIN", "INNER JOIN",
+  "FULL JOIN", "CROSS JOIN", "ON", "AND", "OR", "NOT", "IN", "LIKE", "ILIKE",
+  "IS NULL", "IS NOT NULL", "ORDER BY", "GROUP BY", "HAVING", "LIMIT", "OFFSET",
+  "INSERT INTO", "VALUES", "UPDATE", "SET", "DELETE FROM", "TRUNCATE",
+  "CREATE TABLE", "ALTER TABLE", "DROP TABLE", "CREATE INDEX", "DROP INDEX",
+  "WITH", "UNION", "UNION ALL", "EXCEPT", "INTERSECT", "DISTINCT", "AS",
+  "CASE", "WHEN", "THEN", "ELSE", "END", "BETWEEN", "EXISTS", "RETURNING",
+  "COUNT", "SUM", "AVG", "MIN", "MAX", "COALESCE", "NULLIF", "CAST", "NOW",
+  "CONCAT", "LOWER", "UPPER", "TRIM", "LENGTH", "SUBSTRING", "REPLACE",
+  "TO_CHAR", "TO_DATE", "EXTRACT", "DATE_TRUNC", "CURRENT_DATE",
+  "INT", "INTEGER", "BIGINT", "SMALLINT", "VARCHAR", "TEXT", "BOOLEAN",
+  "FLOAT", "DOUBLE", "DECIMAL", "NUMERIC", "TIMESTAMP", "DATE", "TIME",
+  "UUID", "JSONB", "JSON", "SERIAL", "BIGSERIAL", "PRIMARY KEY", "FOREIGN KEY",
+  "REFERENCES", "UNIQUE", "NOT NULL", "DEFAULT", "INDEX", "VIEW", "SCHEMA",
+];
+
+function parseSchemaForCompletions(schemaText: string): {
+  tables: string[];
+  columnsByTable: Record<string, string[]>;
+} {
+  const tables: string[] = [];
+  const columnsByTable: Record<string, string[]> = {};
+  const tableRegex = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"?[\w]+"?\.)?"?([\w]+)"?\s*\(/gi;
+  let m: RegExpExecArray | null;
+  while ((m = tableRegex.exec(schemaText)) !== null) {
+    const tableName = m[1];
+    tables.push(tableName);
+    const start = m.index + m[0].length;
+    let depth = 1, i = start;
+    while (i < schemaText.length && depth > 0) {
+      if (schemaText[i] === "(") depth++;
+      else if (schemaText[i] === ")") depth--;
+      i++;
+    }
+    const body = schemaText.slice(start, i - 1);
+    const cols: string[] = [];
+    for (const line of body.split("\n")) {
+      const t = line.trim();
+      if (!t || /^(PRIMARY|FOREIGN|UNIQUE|CHECK|CONSTRAINT|INDEX)/i.test(t)) continue;
+      const col = t.match(/^"?([\w]+)"?\s+\w/);
+      if (col) cols.push(col[1]);
+    }
+    columnsByTable[tableName] = cols;
+  }
+  return { tables, columnsByTable };
+}
+
+function getCaretViewportCoords(ta: HTMLTextAreaElement): { x: number; y: number } {
+  const style = window.getComputedStyle(ta);
+  const taRect = ta.getBoundingClientRect();
+  const mirror = document.createElement("div");
+  Object.assign(mirror.style, {
+    position: "fixed", visibility: "hidden", pointerEvents: "none",
+    top: "0px", left: "0px",
+    width: `${taRect.width}px`,
+    overflow: "hidden", whiteSpace: "pre-wrap", wordBreak: "break-word",
+    fontFamily: style.fontFamily, fontSize: style.fontSize,
+    fontWeight: style.fontWeight, lineHeight: style.lineHeight,
+    paddingTop: style.paddingTop, paddingRight: style.paddingRight,
+    paddingBottom: style.paddingBottom, paddingLeft: style.paddingLeft,
+    borderTopWidth: style.borderTopWidth, borderRightWidth: style.borderRightWidth,
+    borderBottomWidth: style.borderBottomWidth, borderLeftWidth: style.borderLeftWidth,
+    boxSizing: style.boxSizing,
+  });
+  mirror.textContent = ta.value.slice(0, ta.selectionStart ?? 0);
+  const span = document.createElement("span");
+  span.textContent = "\u200b";
+  mirror.appendChild(span);
+  document.body.appendChild(mirror);
+  const spanRect = span.getBoundingClientRect();
+  document.body.removeChild(mirror);
+  return {
+    x: taRect.left + spanRect.left,
+    y: taRect.top - ta.scrollTop + spanRect.top + spanRect.height,
+  };
+}
+
+type ACItem = { label: string; kind: "keyword" | "table" | "column" };
+
+function SQLAutoCompleteEditor({
+  value,
+  onChange,
+  onRun,
+  tables,
+  columnsByTable,
+  placeholder,
+  className,
+  style,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onRun: () => void;
+  tables: string[];
+  columnsByTable: Record<string, string[]>;
+  placeholder?: string;
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [items, setItems] = useState<ACItem[]>([]);
+  const [selIdx, setSelIdx] = useState(0);
+  const [dropPos, setDropPos] = useState<{ x: number; y: number } | null>(null);
+
+  const allItems = useMemo<ACItem[]>(() => [
+    ...SQL_KEYWORDS.map((k) => ({ label: k, kind: "keyword" as const })),
+    ...tables.map((t) => ({ label: t, kind: "table" as const })),
+    ...Object.entries(columnsByTable).flatMap(([, cols]) =>
+      cols.map((c) => ({ label: c, kind: "column" as const }))
+    ),
+  ], [tables, columnsByTable]);
+
+  const dismiss = useCallback(() => { setItems([]); setDropPos(null); }, []);
+
+  const updateSuggestions = useCallback(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    const pos = ta.selectionStart ?? 0;
+    const before = ta.value.slice(0, pos);
+    const match = before.match(/[\w.]+$/);
+    const token = match ? match[0] : "";
+    if (token.length < 2) { dismiss(); return; }
+    const lower = token.toLowerCase();
+    const filtered = allItems
+      .filter((it) => it.label.toLowerCase().startsWith(lower) && it.label.toLowerCase() !== lower)
+      .slice(0, 8);
+    setItems(filtered);
+    setSelIdx(0);
+    if (filtered.length > 0) {
+      const wrap = wrapRef.current;
+      if (!wrap) return;
+      const wrapRect = wrap.getBoundingClientRect();
+      const coords = getCaretViewportCoords(ta);
+      let x = coords.x - wrapRect.left;
+      let y = coords.y - wrapRect.top;
+      // clamp so dropdown doesn't overflow right edge
+      x = Math.min(x, wrapRect.width - 220);
+      setDropPos({ x, y });
+    } else {
+      dismiss();
+    }
+  }, [allItems, dismiss]);
+
+  const acceptSuggestion = useCallback((label: string) => {
+    const ta = taRef.current;
+    if (!ta) return;
+    const pos = ta.selectionStart ?? 0;
+    const before = value.slice(0, pos);
+    const after = value.slice(pos);
+    const match = before.match(/[\w.]+$/);
+    const tokenLen = match ? match[0].length : 0;
+    const newVal = before.slice(0, before.length - tokenLen) + label + after;
+    onChange(newVal);
+    dismiss();
+    requestAnimationFrame(() => {
+      if (!ta) return;
+      const newPos = pos - tokenLen + label.length;
+      ta.selectionStart = ta.selectionEnd = newPos;
+      ta.focus();
+    });
+  }, [value, onChange, dismiss]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (items.length > 0) {
+      if (e.key === "ArrowDown") { e.preventDefault(); setSelIdx((i) => (i + 1) % items.length); return; }
+      if (e.key === "ArrowUp")   { e.preventDefault(); setSelIdx((i) => (i - 1 + items.length) % items.length); return; }
+      if (e.key === "Tab" || (e.key === "Enter" && !e.ctrlKey && !e.metaKey)) {
+        e.preventDefault(); acceptSuggestion(items[selIdx].label); return;
+      }
+      if (e.key === "Escape") { dismiss(); return; }
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); onRun(); }
+  }, [items, selIdx, acceptSuggestion, dismiss, onRun]);
+
+  const kindColor: Record<string, string> = {
+    keyword: "text-brand-400",
+    table:   "text-green-400",
+    column:  "text-yellow-400",
+  };
+  const kindBadge: Record<string, string> = {
+    keyword: "kw",
+    table:   "tbl",
+    column:  "col",
+  };
+
+  return (
+    <div ref={wrapRef} className="relative flex-1 flex flex-col min-h-0">
+      <textarea
+        ref={taRef}
+        className={className}
+        style={style}
+        value={value}
+        onChange={(e) => { onChange(e.target.value); updateSuggestions(); }}
+        onKeyDown={handleKeyDown}
+        onBlur={() => setTimeout(dismiss, 120)}
+        spellCheck={false}
+        placeholder={placeholder}
+      />
+      {items.length > 0 && dropPos && (
+        <div
+          className="absolute z-50 w-56 rounded-lg border border-surface-border bg-surface-50 shadow-2xl overflow-hidden py-1"
+          style={{ left: dropPos.x, top: dropPos.y }}
+        >
+          {items.map((it, i) => (
+            <div
+              key={it.label + it.kind}
+              className={cn(
+                "flex items-center justify-between gap-2 px-3 py-1.5 text-sm font-mono cursor-pointer select-none",
+                i === selIdx
+                  ? "bg-brand-500/20"
+                  : "hover:bg-surface-100",
+              )}
+              onMouseDown={(e) => { e.preventDefault(); acceptSuggestion(it.label); }}
+            >
+              <span className={cn("truncate font-mono", i === selIdx ? "text-brand-300" : kindColor[it.kind])}>
+                {it.label}
+              </span>
+              <span className="text-2xs text-fg-subtle shrink-0 font-sans px-1 py-0.5 rounded bg-surface-100">
+                {kindBadge[it.kind]}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AIAssistPanel({
   dbType,
   dbVersion,
@@ -1347,6 +1578,16 @@ export default function QueryEditorPage() {
 
   const { data: databases = [], refetch: refetchDatabases } = useDatabases(isRedis ? "" : (selectedClusterId ?? ""));
 
+  // Schema for autocomplete
+  const { data: acSchemaData } = useSchemaContext(
+    isRedis ? "" : selectedClusterId,
+    selectedDatabase,
+  );
+  const { tables: acTables, columnsByTable: acColumns } = useMemo(
+    () => parseSchemaForCompletions(acSchemaData?.schema_text ?? ""),
+    [acSchemaData?.schema_text],
+  );
+
   const historyStorageKey = useMemo(
     () => selectedCluster ? `pocketdb_history_${selectedCluster.name}` : null,
     [selectedCluster],
@@ -1776,24 +2017,33 @@ export default function QueryEditorPage() {
               </div>
               <span className="text-2xs text-fg-subtle font-mono">Ctrl + ↵ to run</span>
             </div>
-            <textarea
-              className="flex-1 w-full bg-surface font-mono text-base p-4 resize-none focus:outline-none"
-              style={{ color: "var(--text-strong)", minHeight: 0 }}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                  e.preventDefault();
-                  handleRun();
-                }
-              }}
-              spellCheck={false}
-              placeholder={
-                isRedis
-                  ? "Type a Redis command… (e.g. PING  ·  SET mykey value  ·  KEYS *)"
-                  : "Write your SQL here… (Ctrl + Enter to run)"
-              }
-            />
+            {isRedis ? (
+              <textarea
+                className="flex-1 w-full bg-surface font-mono text-base p-4 resize-none focus:outline-none"
+                style={{ color: "var(--text-strong)", minHeight: 0 }}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                    e.preventDefault();
+                    handleRun();
+                  }
+                }}
+                spellCheck={false}
+                placeholder="Type a Redis command… (e.g. PING  ·  SET mykey value  ·  KEYS *)"
+              />
+            ) : (
+              <SQLAutoCompleteEditor
+                value={query}
+                onChange={setQuery}
+                onRun={handleRun}
+                tables={acTables}
+                columnsByTable={acColumns}
+                className="flex-1 w-full bg-surface font-mono text-base p-4 resize-none focus:outline-none"
+                style={{ color: "var(--text-strong)", minHeight: 0 }}
+                placeholder="Write your SQL here… (Ctrl + Enter to run)"
+              />
+            )}
             {/* ── Editor action bar ── */}
             <div className="shrink-0 flex items-center justify-end gap-2 px-3 py-2 border-t border-surface-border bg-surface-50">
               <button
