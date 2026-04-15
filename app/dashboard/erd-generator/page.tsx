@@ -29,9 +29,10 @@ import {
   faWandMagicSparkles,
   faXmark,
   faStop,
-  faPlay,
   faArrowRight,
   faRobot,
+  faArrowRotateLeft,
+  faArrowRotateRight,
 } from "@fortawesome/free-solid-svg-icons";
 import { browserApi, clusterApi, aiApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -231,22 +232,47 @@ function parseDDLToSchemas(raw: string): TableSchema[] {
   return schemas;
 }
 
-// ─── AI ERD Design Panel ──────────────────────────────────────────────────────
+// ─── AI ERD Bottom Bar ────────────────────────────────────────────────────────
+const AI_SUGGESTIONS = [
+  "E-commerce with users, products, orders & reviews",
+  "Blog with posts, comments, tags & authors",
+  "Add a notifications table linked to users",
+  "SaaS with workspaces, members & subscriptions",
+  "Remove the region table",
+];
+
 function AIERDPanel({
   existingTables,
   onApplySchemas,
-  onClose,
+  onFocusRef,
+  initialPrompt,
 }: {
   existingTables: TableSchema[];
   onApplySchemas: (schemas: TableSchema[], mode: "replace" | "merge") => void;
-  onClose: () => void;
+  onFocusRef?: (fn: () => void) => void;
+  initialPrompt?: string;
 }) {
-  const [prompt, setPrompt] = useState("");
-  const [ddl, setDdl] = useState("");
+  const [prompt, setPrompt] = useState(initialPrompt ?? "");
+  const [inputFocused, setInputFocused] = useState(false);
   const [streaming, setStreaming] = useState(false);
-  const [parsed, setParsed] = useState<TableSchema[]>([]);
+  const [magicPhase, setMagicPhase] = useState<"idle" | "thinking" | "drawing" | "done" | "error">("idle");
+  const [magicMsg, setMagicMsg] = useState("");
   const abortRef = useRef<{ abort: boolean }>({ abort: false });
   const ddlRef = useRef("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Apply initial prompt from page-level suggestion click
+  useEffect(() => {
+    if (initialPrompt) {
+      setPrompt(initialPrompt);
+      inputRef.current?.focus();
+    }
+  }, [initialPrompt]);
+
+  // Expose focus to parent
+  useEffect(() => {
+    onFocusRef?.(() => { inputRef.current?.focus(); });
+  }, [onFocusRef]);
 
   // Image upload / paste state
   const [imageBase64, setImageBase64] = useState<string | null>(null);
@@ -303,10 +329,10 @@ function AIERDPanel({
 
   const handleGenerate = useCallback(async () => {
     if ((!prompt.trim() && !imageBase64) || streaming) return;
-    setDdl("");
-    setParsed([]);
     ddlRef.current = "";
     setStreaming(true);
+    setMagicPhase("thinking");
+    setMagicMsg("Thinking…");
     abortRef.current.abort = false;
 
     try {
@@ -316,208 +342,172 @@ function AIERDPanel({
         imageBase64: imageBase64 ?? undefined,
         imageMimeType: imageMimeType,
       });
+      let chunkCount = 0;
       for await (const chunk of stream) {
         if (abortRef.current.abort) break;
         ddlRef.current += chunk;
-        setDdl(ddlRef.current);
+        chunkCount++;
+        if (chunkCount === 3) { setMagicPhase("drawing"); setMagicMsg("Designing schema…"); }
       }
       // Parse accumulated DDL into table schemas
       const schemas = parseDDLToSchemas(ddlRef.current);
-      setParsed(schemas);
       if (schemas.length === 0) {
-        // Check if AI returned an informational comment (e.g. "cannot remove tables")
         const commentOnly = /^[\s\-\-]+/.test(ddlRef.current.trim()) &&
           !/CREATE\s+TABLE/i.test(ddlRef.current);
-        if (commentOnly) {
-          const msg = ddlRef.current.replace(/^--\s*/gm, "").trim().split("\n")[0];
-          toast.error(msg || "AI returned no CREATE TABLE statements");
-        } else {
-          toast.error("No tables could be parsed from the generated DDL");
-        }
+        const errMsg = commentOnly
+          ? (ddlRef.current.replace(/^--\s*/gm, "").trim().split("\n")[0] || "AI returned no CREATE TABLE statements")
+          : "No tables could be parsed from the generated DDL";
+        setMagicPhase("error");
+        setMagicMsg(errMsg);
+        toast.error(errMsg);
+      } else {
+        setMagicPhase("done");
+        setMagicMsg(`${schemas.length} table${schemas.length !== 1 ? "s" : ""} applied to canvas`);
+        onApplySchemas(schemas, "replace");
+        toast.success(`Canvas updated — ${schemas.length} table${schemas.length !== 1 ? "s" : ""}`);
+        setTimeout(() => { setMagicPhase("idle"); setMagicMsg(""); }, 2400);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "AI request failed";
+      setMagicPhase("error");
+      setMagicMsg(msg);
       toast.error(msg);
     } finally {
       setStreaming(false);
     }
-  }, [prompt, streaming, existingDDL, imageBase64, imageMimeType]);
+  }, [prompt, streaming, existingDDL, imageBase64, imageMimeType, onApplySchemas]);
 
   const handleStop = () => { abortRef.current.abort = true; };
+  const showSuggestions = magicPhase === "idle" && (prompt === "" || inputFocused);
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* Header */}
-      <div className="shrink-0 flex items-center justify-between px-3 py-2.5 border-b border-surface-border bg-surface-50">
-        <div className="flex items-center gap-2">
-          <FontAwesomeIcon icon={faRobot} className="text-brand-400 text-xs" />
-          <span className="text-xs font-semibold text-fg-base">AI Schema Designer</span>
-          <span className="text-2xs bg-brand-500/10 text-brand-400 px-1.5 py-0.5 rounded font-medium">Gemini</span>
-        </div>
-        <button
-          onClick={onClose}
-          className="w-6 h-6 flex items-center justify-center rounded-md text-fg-subtle hover:text-fg-base hover:bg-surface-100 transition-colors"
-        >
-          <FontAwesomeIcon icon={faXmark} className="text-xs" />
-        </button>
-      </div>
-
-      {/* Body */}
-      <div className="flex-1 overflow-y-auto flex flex-col gap-3 p-3 min-h-0">
-
-        {/* Existing context badge */}
-        {existingTables.length > 0 && (
-          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-brand-500/8 border border-brand-500/20 text-2xs text-brand-300">
-            <FontAwesomeIcon icon={faDatabase} className="text-xs shrink-0" />
-            AI can see your {existingTables.length} existing table{existingTables.length !== 1 ? "s" : ""} — add, remove or modify any of them
-          </div>
-        )}
-
-        {/* Prompt examples */}
-        {!ddl && !streaming && (
-          <div className="grid gap-1.5">
-            <p className="text-2xs text-fg-muted font-medium mb-0.5">Try an example:</p>
-            {[
-              "E-commerce platform with users, products, orders and reviews",
-              "Blog with posts, comments, tags and author profiles",
-              "Add a notifications table linked to users",
-              "Remove the region table",
-              "Add an email column to the users table",
-            ].map((ex) => (
-              <button
-                key={ex}
-                onClick={() => setPrompt(ex)}
-                className="text-left text-xs text-fg-muted hover:text-fg-base px-3 py-2 rounded-lg hover:bg-surface-100 border border-surface-border hover:border-brand-500/40 transition-colors"
-              >
-                <FontAwesomeIcon icon={faArrowRight} className="mr-2 text-brand-400 text-xs" />
-                {ex}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Generated DDL */}
-        {(ddl || streaming) && (
-          <div className="rounded-xl border border-surface-border bg-[#0d1117] overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between px-3 py-1.5 border-b border-surface-border/50 bg-[#161b22]">
-              <span className="text-2xs text-fg-muted font-mono uppercase tracking-wide">PostgreSQL DDL</span>
-              {streaming
-                ? <span className="text-2xs text-brand-400 animate-pulse">Generating…</span>
-                : parsed.length > 0
-                  ? <span className="text-2xs text-green-400">{parsed.length} table{parsed.length !== 1 ? "s" : ""} detected</span>
-                  : <span className="text-2xs text-amber-400">No tables parsed</span>
-              }
-            </div>
-            <pre className="p-3 text-2xs font-mono text-green-300 overflow-auto max-h-64 leading-relaxed whitespace-pre-wrap break-words">
-              {ddl}
-              {streaming && <span className="inline-block w-[2px] h-[12px] bg-brand-400 ml-[2px] align-text-bottom rounded-[1px] animate-pulse" />}
-            </pre>
-          </div>
-        )}
-      </div>
-
-      {/* Apply buttons */}
-      {parsed.length > 0 && !streaming && (
-        <div className="shrink-0 border-t border-surface-border px-3 py-2.5 flex gap-2">
-          <button
-            onClick={() => { onApplySchemas(parsed, "replace"); toast.success(`Canvas updated — ${parsed.length} table${parsed.length !== 1 ? "s" : ""}`); }}
-            className="flex-1 btn-primary text-xs py-1.5 flex items-center justify-center gap-1.5"
-          >
-            <FontAwesomeIcon icon={faPlay} className="text-xs" />
-            Apply to Canvas
-          </button>
+    <div className="w-full flex flex-col items-center gap-2.5 pointer-events-none">
+      {/* ── Suggestion chips ── */}
+      {showSuggestions && (
+        <div className="pointer-events-auto flex flex-wrap justify-center gap-2 max-w-2xl px-4">
+          {AI_SUGGESTIONS.map((s) => (
+            <button
+              key={s}
+              onClick={() => { setPrompt(s); inputRef.current?.focus(); }}
+              className="text-xs text-fg-muted hover:text-fg-base bg-surface-50/90 hover:bg-surface-100 border border-surface-border hover:border-brand-500/40 backdrop-blur-md rounded-full px-3 py-1.5 transition-all duration-150 shadow-sm"
+            >
+              {s}
+            </button>
+          ))}
         </div>
       )}
 
-      {/* Input */}
-      <div className="shrink-0 border-t border-surface-border p-2 flex flex-col gap-2">
-
-        {/* Image preview */}
-        {imagePreviewUrl && (
-          <div className="relative rounded-xl overflow-hidden border border-brand-500/30 bg-surface-100">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={imagePreviewUrl}
-              alt="Uploaded schema"
-              className="w-full max-h-36 object-contain"
-            />
-            <button
-              onClick={clearImage}
-              title="Remove image"
-              className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded-full bg-black/60 hover:bg-red-500/80 text-white text-xs transition-colors"
-            >
-              <FontAwesomeIcon icon={faXmark} />
-            </button>
-            <div className="absolute bottom-1 left-2 text-2xs text-white/70 bg-black/50 rounded px-1.5 py-0.5">
-              Image attached — AI will analyze it
+      {/* ── Magic status strip ── */}
+      {magicPhase !== "idle" && (
+        <div className={cn(
+          "pointer-events-auto flex items-center gap-3 px-4 py-2.5 rounded-2xl border backdrop-blur-md text-sm transition-all duration-300",
+          magicPhase === "error"   ? "border-red-500/30 bg-red-500/10 text-red-400"
+          : magicPhase === "done" ? "border-green-500/30 bg-green-500/10 text-green-600 dark:text-green-300"
+          : "border-brand-500/25 bg-surface-50/90 text-fg-base"
+        )}>
+          {(magicPhase === "thinking" || magicPhase === "drawing") && (
+            <div className="flex gap-1 items-center shrink-0">
+              {[0, 120, 240].map((d) => (
+                <span key={d} className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-bounce" style={{ animationDelay: `${d}ms` }} />
+              ))}
             </div>
+          )}
+          {magicPhase === "done" && <FontAwesomeIcon icon={faCheck} className="text-green-400 shrink-0" />}
+          {magicPhase === "error" && <FontAwesomeIcon icon={faTriangleExclamation} className="text-red-400 shrink-0" />}
+          <span className="text-xs font-medium">
+            {magicPhase === "thinking" ? "Thinking…"
+            : magicPhase === "drawing" ? "Designing schema…"
+            : magicPhase === "done"    ? magicMsg
+            : magicMsg}
+          </span>
+        </div>
+      )}
+
+      {/* ── Main input bar ── */}
+      <div className="pointer-events-auto w-full max-w-2xl px-4">
+
+        {/* Image preview pill */}
+        {imagePreviewUrl && (
+          <div className="relative mb-2 flex items-center gap-2 px-3 py-1.5 rounded-xl border border-brand-500/30 bg-surface-100/80 backdrop-blur-md w-fit max-w-full">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={imagePreviewUrl} alt="Uploaded schema" className="h-8 w-8 rounded object-cover shrink-0" />
+            <span className="text-2xs text-fg-subtle truncate">Image attached — AI will analyze it</span>
+            <button onClick={clearImage} className="ml-1 w-4 h-4 flex items-center justify-center rounded-full bg-surface-200 hover:bg-red-500/40 text-fg-subtle hover:text-red-300 transition-colors shrink-0">
+              <FontAwesomeIcon icon={faXmark} className="text-[9px]" />
+            </button>
           </div>
         )}
 
-        {/* Hidden file input */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) loadImageFile(file);
-          }}
-        />
+        <div className="flex items-center gap-2 px-3 py-2.5 rounded-2xl border border-surface-border bg-surface-50/95 backdrop-blur-xl shadow-2xl shadow-black/20 ring-1 ring-surface-border/40">
+          {/* Wand icon */}
+          <FontAwesomeIcon icon={faWandMagicSparkles} className="text-brand-400 text-sm shrink-0 ml-1" />
 
-        <div className="relative">
-          <textarea
+          {/* Input */}
+          <input
+            ref={inputRef}
+            type="text"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                if (!streaming) handleGenerate();
-              }
+              if (e.key === "Enter" && !streaming) handleGenerate();
             }}
             onPaste={handlePaste}
-            placeholder={imageBase64 ? "Add a description (optional) or just generate from image…" : "Describe your database schema… or paste / upload an image"}
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => setInputFocused(false)}
+            placeholder="Describe your schema, or ask to modify it…"
             disabled={streaming}
-            rows={3}
-            className="w-full bg-surface-100 border border-surface-border rounded-xl px-3 pt-2.5 pb-8 text-xs text-fg-base placeholder:text-fg-subtle resize-none focus:outline-none focus:border-brand-500 disabled:opacity-50 transition-colors"
+            autoFocus
+            className="flex-1 bg-transparent text-sm text-fg-base placeholder:text-fg-subtle outline-none disabled:opacity-50 min-w-0"
           />
-          <div className="absolute bottom-2 right-2 flex items-center gap-1">
-            {/* Upload image button */}
-            {!streaming && (
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                title="Upload image (ERD screenshot, whiteboard photo)"
-                className={`flex items-center justify-center w-6 h-6 rounded-lg transition-colors ${imageBase64 ? "bg-brand-500/20 text-brand-300 border border-brand-500/40" : "hover:bg-surface-200 text-fg-subtle hover:text-fg-base"}`}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                  <path fillRule="evenodd" d="M1 5.25A2.25 2.25 0 0 1 3.25 3h13.5A2.25 2.25 0 0 1 19 5.25v9.5A2.25 2.25 0 0 1 16.75 17H3.25A2.25 2.25 0 0 1 1 14.75v-9.5Zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 0 0 .75-.75v-2.69l-2.22-2.219a.75.75 0 0 0-1.06 0l-1.91 1.909-.47-.47a.75.75 0 0 0-1.06 0L6.53 13.091 2.5 11.061Zm0-1.56 3.56 1.78a.75.75 0 0 0 .85-.12l2.5-2.5a.75.75 0 0 1 1.06 0l.47.47 1.91-1.909a2.25 2.25 0 0 1 3.182 0L18.5 13.06V5.25a.75.75 0 0 0-.75-.75H3.25a.75.75 0 0 0-.75.75v5ZM7 7.75a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 0 1 2.5 0Z" clipRule="evenodd" />
-                </svg>
-              </button>
-            )}
-            {streaming ? (
-              <button
-                onClick={handleStop}
-                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs transition-colors"
-              >
-                <FontAwesomeIcon icon={faStop} className="text-xs" />
-                Stop
-              </button>
-            ) : (
-              <button
-                onClick={handleGenerate}
-                disabled={!prompt.trim() && !imageBase64}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-brand-600 hover:bg-brand-500 disabled:opacity-40 text-white text-xs font-medium transition-colors"
-              >
-                <FontAwesomeIcon icon={faWandMagicSparkles} className="text-xs" />
-                Generate
-              </button>
-            )}
-          </div>
-          <div className="absolute bottom-2 left-3">
-            <span className="text-xs text-fg-subtle">↵ generate · paste image</span>
-          </div>
+
+          {/* Image upload */}
+          {!streaming && (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              title="Upload image"
+              className={cn(
+                "w-7 h-7 flex items-center justify-center rounded-xl transition-colors shrink-0",
+                imageBase64 ? "bg-brand-500/20 text-brand-300 border border-brand-500/40" : "text-fg-subtle hover:text-fg-base hover:bg-surface-100"
+              )}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                <path fillRule="evenodd" d="M1 5.25A2.25 2.25 0 0 1 3.25 3h13.5A2.25 2.25 0 0 1 19 5.25v9.5A2.25 2.25 0 0 1 16.75 17H3.25A2.25 2.25 0 0 1 1 14.75v-9.5Zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 0 0 .75-.75v-2.69l-2.22-2.219a.75.75 0 0 0-1.06 0l-1.91 1.909-.47-.47a.75.75 0 0 0-1.06 0L6.53 13.091 2.5 11.061Zm0-1.56 3.56 1.78a.75.75 0 0 0 .85-.12l2.5-2.5a.75.75 0 0 1 1.06 0l.47.47 1.91-1.909a2.25 2.25 0 0 1 3.182 0L18.5 13.06V5.25a.75.75 0 0 0-.75-.75H3.25a.75.75 0 0 0-.75.75v5ZM7 7.75a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 0 1 2.5 0Z" clipRule="evenodd" />
+              </svg>
+            </button>
+          )}
+
+          {/* Hidden file input */}
+          <input ref={fileInputRef} type="file" accept="image/*" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) loadImageFile(f); }} />
+
+          {/* Divider */}
+          <div className="w-px h-5 bg-surface-border shrink-0" />
+
+          {/* Stop / Generate */}
+          {streaming ? (
+            <button onClick={handleStop} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs font-medium transition-colors shrink-0">
+              <FontAwesomeIcon icon={faStop} className="text-xs" />
+              Stop
+            </button>
+          ) : (
+            <button
+              onClick={handleGenerate}
+              disabled={!prompt.trim() && !imageBase64}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 disabled:opacity-30 disabled:cursor-not-allowed text-white text-xs font-semibold transition-colors shrink-0"
+            >
+              <FontAwesomeIcon icon={faWandMagicSparkles} className="text-xs" />
+              Generate
+            </button>
+          )}
         </div>
+
+        {/* Existing context note */}
+        {existingTables.length > 0 && showSuggestions && (
+          <p className="text-center text-2xs text-fg-muted mt-1.5">
+            <FontAwesomeIcon icon={faDatabase} className="mr-1 text-brand-400/70" />
+            AI can see your {existingTables.length} existing table{existingTables.length !== 1 ? "s" : ""} — add, remove or modify any of them
+          </p>
+        )}
       </div>
     </div>
   );
@@ -719,9 +709,16 @@ export default function ERDGeneratorPage() {
   const [pan,       setPan]       = useState<Pos>({ x: 32, y: 32 });
   const [hoveredFK, setHoveredFK] = useState<string | null>(null);
 
+  // ── Undo / Redo history ───────────────────────────────────────────────────
+  type HistoryEntry = { tables: TableSchema[]; positions: Record<string, Pos> };
+  const [history,    setHistory]    = useState<HistoryEntry[]>([]);
+  const [historyIdx, setHistoryIdx] = useState(-1);
+
   // ── UI state ─────────────────────────────────────────────────────────────────
   const [filterOpen,       setFilterOpen]       = useState(false);
-  const [aiPanelOpen,      setAiPanelOpen]      = useState(false);
+  const [aiPanelOpen,      setAiPanelOpen]      = useState(true);
+  const [aiInitialPrompt,  setAiInitialPrompt]  = useState<string | undefined>(undefined);
+  const aiInputFocusFn = useRef<(() => void) | null>(null);
   const [hiddenTables,     setHiddenTables]     = useState<Set<string>>(new Set());
   const [view,             setView]             = useState<"erd" | "schema">("erd");
   const [showCardinality,  setShowCardinality]  = useState(true);
@@ -979,6 +976,48 @@ export default function ERDGeneratorPage() {
   const showAllTables  = useCallback(() => setHiddenTables(new Set()), []);
   const hideAllTables  = useCallback(() => setHiddenTables(new Set(tables.map((t) => t.name))), [tables]);
 
+  // ── Push to undo history ──────────────────────────────────────────────────
+  const pushHistory = useCallback((t: TableSchema[], pos: Record<string, Pos>) => {
+    setHistory((prev) => {
+      const trimmed = prev.slice(0, historyIdx + 1);
+      return [...trimmed, { tables: t, positions: pos }].slice(-40);
+    });
+    setHistoryIdx((prev) => Math.min(prev + 1, 39));
+  }, [historyIdx]);
+
+  const undo = useCallback(() => {
+    if (historyIdx <= 0) return;
+    const entry = history[historyIdx - 1];
+    setHistoryIdx((i) => i - 1);
+    setTables(entry.tables);
+    setPositions(entry.positions);
+    setHiddenTables(new Set());
+  }, [history, historyIdx]);
+
+  const redo = useCallback(() => {
+    if (historyIdx >= history.length - 1) return;
+    const entry = history[historyIdx + 1];
+    setHistoryIdx((i) => i + 1);
+    setTables(entry.tables);
+    setPositions(entry.positions);
+    setHiddenTables(new Set());
+  }, [history, historyIdx]);
+
+  const canUndo = historyIdx > 0;
+  const canRedo = historyIdx < history.length - 1;
+
+  // ── Keyboard shortcuts (Ctrl+Z / Ctrl+Shift+Z) ───────────────────────────────
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (!ctrl) return;
+      if (e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+      if ((e.key === "z" && e.shiftKey) || e.key === "y") { e.preventDefault(); redo(); }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [undo, redo]);
+
   // ── Apply AI-generated schemas to canvas ──────────────────────────────────────
   const applyAISchemas = useCallback((schemas: TableSchema[], mode: "replace" | "merge") => {
     const merged = mode === "merge"
@@ -987,14 +1026,16 @@ export default function ERDGeneratorPage() {
           ...schemas,
         ]
       : schemas;
+    const newPos = autoLayout(merged);
+    pushHistory(merged, newPos);
     setTables(merged);
-    setPositions(autoLayout(merged));
+    setPositions(newPos);
     setHiddenTables(new Set());
     const z = 0.78;
     const p = { x: 32, y: 32 };
     setZoom(z); zoomRef.current = z;
     setPan(p);  panRef.current  = p;
-  }, [tables]);
+  }, [tables, pushHistory]);
 
   // ── SVG Export ────────────────────────────────────────────────────────────────
   const exportSVG = useCallback(() => {
@@ -1225,17 +1266,54 @@ export default function ERDGeneratorPage() {
           </div>
         )}
 
+        {/* Undo / Redo */}
+        {(canUndo || canRedo) && (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={undo}
+              disabled={!canUndo}
+              title="Undo (Ctrl+Z)"
+              className={cn(
+                "w-7 h-7 rounded-md border flex items-center justify-center text-xs transition-colors",
+                canUndo
+                  ? "border-surface-border bg-surface hover:bg-surface-100 text-fg-subtle hover:text-fg-base"
+                  : "border-surface-border/40 bg-surface/40 text-fg-subtle/30 cursor-not-allowed"
+              )}
+            >
+              <FontAwesomeIcon icon={faArrowRotateLeft} />
+            </button>
+            <button
+              onClick={redo}
+              disabled={!canRedo}
+              title="Redo (Ctrl+Shift+Z)"
+              className={cn(
+                "w-7 h-7 rounded-md border flex items-center justify-center text-xs transition-colors",
+                canRedo
+                  ? "border-surface-border bg-surface hover:bg-surface-100 text-fg-subtle hover:text-fg-base"
+                  : "border-surface-border/40 bg-surface/40 text-fg-subtle/30 cursor-not-allowed"
+              )}
+            >
+              <FontAwesomeIcon icon={faArrowRotateRight} />
+            </button>
+          </div>
+        )}
+
         {/* Spacer */}
         <div className="flex-1" />
 
         {/* AI Design button */}
         <button
-          onClick={() => { setAiPanelOpen((v) => !v); setFilterOpen(false); }}
+          onClick={() => {
+            if (aiPanelOpen) {
+              aiInputFocusFn.current?.();
+            } else {
+              setAiPanelOpen(true);
+              setFilterOpen(false);
+            }
+          }}
           className={cn(
             "flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors",
-            aiPanelOpen
-              ? "border-brand-500/50 bg-brand-500/10 text-brand-300"
-              : "border-brand-500/30 bg-brand-500/5 text-brand-400 hover:bg-brand-500/10 hover:border-brand-500/50"
+            "border-brand-500/30 bg-brand-500/5 text-brand-400 hover:bg-brand-500/10 hover:border-brand-500/50"
           )}
           title="AI Schema Designer — generate ERD from a description"
         >
@@ -1360,8 +1438,8 @@ export default function ERDGeneratorPage() {
               className="w-full h-full overflow-hidden cursor-grab active:cursor-grabbing"
               style={{
                 background: `
-                  radial-gradient(circle at 50% 50%, transparent 60%, #0d1117 100%),
-                  radial-gradient(circle at 1px 1px, #1e2433 1px, transparent 0) 0 0 / 24px 24px
+                  radial-gradient(circle at 50% 50%, transparent 60%, var(--bg) 100%),
+                  radial-gradient(circle at 1px 1px, rgb(var(--surface-100)) 1px, transparent 0) 0 0 / 24px 24px
                 `,
               }}
               onMouseDown={onCanvasMouseDown}
@@ -1611,19 +1689,18 @@ export default function ERDGeneratorPage() {
           )}
         </div>
 
-        {/* ── AI Design Panel ───────────────────────────────────────────────── */}
-        {aiPanelOpen && (
-          <div className="w-80 shrink-0 border-l border-surface-border bg-surface flex flex-col overflow-hidden">
-            <AIERDPanel
-              existingTables={tables}
-              onApplySchemas={(schemas, mode) => {
-                applyAISchemas(schemas, mode);
-                setView("erd");
-              }}
-              onClose={() => setAiPanelOpen(false)}
-            />
-          </div>
-        )}
+        {/* ── AI Design Bottom Bar ────────────────────────────────────── */}
+        <div className="absolute bottom-6 left-0 right-0 z-30 flex justify-center pointer-events-none">
+          <AIERDPanel
+            existingTables={tables}
+            initialPrompt={aiInitialPrompt}
+            onFocusRef={(fn) => { aiInputFocusFn.current = fn; }}
+            onApplySchemas={(schemas, mode) => {
+              applyAISchemas(schemas, mode);
+              setView("erd");
+            }}
+          />
+        </div>
 
         {/* ── Filter Panel ─────────────────────────────────────────────────── */}
         {filterOpen && tables.length > 0 && (
