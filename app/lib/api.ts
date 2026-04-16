@@ -369,6 +369,15 @@ export const aiConversationApi = {
     }),
 };
 
+export const databaseApi = {
+  list: () => api.get("/databases").then((r) => r.data),
+
+  create: (data: { name: string; db_type: "postgres" | "mysql" }) =>
+    api.post("/databases", data).then((r) => r.data),
+
+  delete: (id: string) => api.delete(`/databases/${id}`),
+};
+
 
 
 

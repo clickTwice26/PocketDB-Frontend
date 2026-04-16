@@ -9,6 +9,7 @@ import { useClusters } from "@/hooks/useClusters";
 import ClusterCard from "@/components/clusters/ClusterCard";
 import Topbar from "@/components/layout/Topbar";
 import { useUIStore } from "@/store/ui";
+import { useAuthStore } from "@/store/auth";
 import type { ClusterListItem } from "@/types";
 import clsx from "clsx";
 
@@ -19,6 +20,8 @@ export default function ClustersPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const { data: clusters = [], isLoading, error } = useClusters();
   const { setCreateModalOpen } = useUIStore();
+  const user = useAuthStore((s) => s.user);
+  const isAdmin = user?.role === "admin";
 
   const filtered = clusters.filter((c: ClusterListItem) => {
     const matchSearch =
@@ -73,7 +76,7 @@ export default function ClustersPage() {
             ))}
           </div>
 
-          <button onClick={() => setCreateModalOpen(true)} className="btn-primary shrink-0">
+          <button onClick={() => setCreateModalOpen(true)} className="btn-primary shrink-0" style={isAdmin ? undefined : { display: "none" }}>
             <FontAwesomeIcon icon={faPlus} />
             New Cluster
           </button>

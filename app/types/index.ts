@@ -160,6 +160,25 @@ export interface RestoreResult {
   error?: string;
 }
 
+// ─── User Databases (Database-as-a-Service) ──────────────────────────────────
+
+export interface UserDatabase {
+  id: string;
+  user_id: string;
+  cluster_id: string | null;
+  database_name: string;
+  db_username: string;
+  db_type: "postgres" | "mysql";
+  host: string;
+  port: number;
+  created_at: string;
+}
+
+export interface UserDatabaseCreateResponse extends UserDatabase {
+  /** One-time plaintext password — not available after creation */
+  db_password: string;
+}
+
 // ─── Query History ───────────────────────────────────────────────────────────
 
 export interface QueryHistoryItem {

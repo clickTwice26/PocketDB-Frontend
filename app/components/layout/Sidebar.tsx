@@ -14,6 +14,7 @@ import {
   faBoxArchive,
   faShareNodes,
   faUserShield,
+  faServer,
 } from "@fortawesome/free-solid-svg-icons";
 import { useUIStore } from "@/store/ui";
 import { useAuthStore } from "@/store/auth";
@@ -29,7 +30,7 @@ import { cn } from "@/lib/utils";
 /* ─── Navigation definition ──────────────────────────────────── */
 const NAV_ITEMS: { href: string; icon: IconDefinition; label: string }[] = [
   { href: "/dashboard/overview",          icon: faChartLine,    label: "Overview"         },
-  { href: "/dashboard/clusters",          icon: faLayerGroup,   label: "Clusters"         },
+  { href: "/dashboard/databases",         icon: faDatabase,     label: "Databases"        },
   { href: "/dashboard/query-editor",      icon: faCode,         label: "Query Editor"     },
   { href: "/dashboard/backup-restore",    icon: faBoxArchive,   label: "Backup & Restore" },
   { href: "/dashboard/erd-generator",     icon: faShareNodes,   label: "ER Diagram"       },
@@ -189,6 +190,17 @@ function SidebarContent({
             onClick={onNavClick}
           />
         ))}
+        {/* Clusters: admin-only */}
+        {user?.role === "admin" && (
+          <NavItem
+            href="/dashboard/clusters"
+            icon={faServer}
+            label="Clusters"
+            active={pathname.startsWith("/dashboard/clusters")}
+            collapsed={collapsed}
+            onClick={onNavClick}
+          />
+        )}
         {user?.role === "admin" && (
           <NavItem
             href="/dashboard/admin"

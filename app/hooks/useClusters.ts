@@ -1,6 +1,6 @@
 "use client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { clusterApi, browserApi, type ClusterCreatePayload } from "@/lib/api";
+import { clusterApi, browserApi, databaseApi, type ClusterCreatePayload } from "@/lib/api";
 import toast from "react-hot-toast";
 
 export const clusterKeys = {
@@ -123,5 +123,44 @@ export function useSchemaContext(clusterId: string, database: string) {
     staleTime: 0,
     refetchOnMount: "always",
     refetchInterval: 10_000,
+  });
+}
+
+// ─── User Databases (Database-as-a-Service) ──────────────────────────────────
+
+export const userDatabaseKeys = {
+  all: ["user-databases"] as const,
+  list: () => [...userDatabaseKeys.all, "list"] as const,
+};
+
+export function useUserDatabases() {
+  return useQuery({
+    queryKey: userDatabaseKeys.list(),
+    queryFn: () => databaseApi.list(),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useCreateDatabase() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { name: string; db_type: "postgres" | "mysql" }) =>
+      databaseApi.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: userDatabaseKeys.all });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+}
+
+export function useDeleteDatabase() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => databaseApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: userDatabaseKeys.all });
+      toast.success("Database deleted");
+    },
+    onError: (err: Error) => toast.error(err.message),
   });
 }
