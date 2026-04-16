@@ -978,6 +978,28 @@ export default function ERDGeneratorPage() {
     if (tables.length > 0) setPositions(autoLayout(tables));
   }, [tables]);
 
+  // ── Toggle table visibility ───────────────────────────────────────────────────
+  const toggleTable = useCallback((name: string) => {
+    setHiddenTables((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }, []);
+
+  const showAllTables  = useCallback(() => setHiddenTables(new Set()), []);
+  const hideAllTables  = useCallback(() => setHiddenTables(new Set(tables.map((t) => t.name))), [tables]);
+
+  // ── Push to undo history ──────────────────────────────────────────────────
+  const pushHistory = useCallback((t: TableSchema[], pos: Record<string, Pos>) => {
+    setHistory((prev) => {
+      const trimmed = prev.slice(0, historyIdx + 1);
+      return [...trimmed, { tables: t, positions: pos }].slice(-40);
+    });
+    setHistoryIdx((prev) => Math.min(prev + 1, 39));
+  }, [historyIdx]);
+
   // ── Save diagram ──────────────────────────────────────────────────────────────
   const handleSaveDiagram = useCallback(async () => {
     if (tables.length === 0 || !saveName.trim()) return;
@@ -1044,28 +1066,6 @@ export default function ERDGeneratorPage() {
       toast.error("Failed to delete diagram");
     }
   }, [activeDiagramId]);
-
-  // ── Toggle table visibility ───────────────────────────────────────────────────
-  const toggleTable = useCallback((name: string) => {
-    setHiddenTables((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  }, []);
-
-  const showAllTables  = useCallback(() => setHiddenTables(new Set()), []);
-  const hideAllTables  = useCallback(() => setHiddenTables(new Set(tables.map((t) => t.name))), [tables]);
-
-  // ── Push to undo history ──────────────────────────────────────────────────
-  const pushHistory = useCallback((t: TableSchema[], pos: Record<string, Pos>) => {
-    setHistory((prev) => {
-      const trimmed = prev.slice(0, historyIdx + 1);
-      return [...trimmed, { tables: t, positions: pos }].slice(-40);
-    });
-    setHistoryIdx((prev) => Math.min(prev + 1, 39));
-  }, [historyIdx]);
 
   const undo = useCallback(() => {
     if (historyIdx <= 0) return;

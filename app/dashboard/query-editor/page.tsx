@@ -18,8 +18,8 @@ import SchemaBrowserPanel from "@/components/clusters/SchemaBrowserPanel";
 import ERDDiagramModal from "@/components/clusters/ERDDiagramModal";
 import { useUIStore } from "@/store/ui";
 import { cn } from "@/lib/utils";
-import type { ClusterListItem, QueryResult } from "@/types";
-import { aiApi, browserApi } from "@/lib/api";
+import type { ClusterListItem, QueryResult, QueryHistoryItem, QueryHistoryPage } from "@/types";
+import { aiApi, browserApi, queryHistoryApi, aiConversationApi } from "@/lib/api";
 import toast from "react-hot-toast";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -239,11 +239,38 @@ function parseSchemaForCompletions(schemaText: string): {
 } {
   const tables: string[] = [];
   const columnsByTable: Record<string, string[]> = {};
-  const tableRegex = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"?[\w]+"?\.)?"?([\w]+)"?\s*\(/gi;
+
+  // ── Format 1: backend human-readable "TABLE name:\n  col type" ──────────────
+  // This is what browserApi.getFullSchema / useSchemaContext returns.
+  const tableBlockRegex = /^TABLE\s+([\w]+)\s*:/gm;
+  let tm: RegExpExecArray | null;
+  while ((tm = tableBlockRegex.exec(schemaText)) !== null) {
+    const tableName = tm[1];
+    if (!columnsByTable[tableName]) {
+      tables.push(tableName);
+      columnsByTable[tableName] = [];
+    }
+    const blockStart = tm.index + tm[0].length;
+    // Collect indented lines until we hit a blank line or another TABLE block
+    const rest = schemaText.slice(blockStart);
+    for (const line of rest.split("\n")) {
+      if (/^TABLE\s+\w/.test(line)) break;      // next table block
+      if (line.trim() === "") continue;           // skip blanks
+      if (!line.startsWith("  ")) break;          // end of indented block
+      const col = line.trim().match(/^([\w]+)\s+/);
+      if (col) columnsByTable[tableName].push(col[1]);
+    }
+  }
+
+  // ── Format 2: DDL "CREATE TABLE name (...)" ─────────────────────────────────
+  const ddlRegex = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"?[\w]+"?\.)?"?([\w]+)"?\s*\(/gi;
   let m: RegExpExecArray | null;
-  while ((m = tableRegex.exec(schemaText)) !== null) {
+  while ((m = ddlRegex.exec(schemaText)) !== null) {
     const tableName = m[1];
-    tables.push(tableName);
+    if (!columnsByTable[tableName]) {
+      tables.push(tableName);
+      columnsByTable[tableName] = [];
+    }
     const start = m.index + m[0].length;
     let depth = 1, i = start;
     while (i < schemaText.length && depth > 0) {
@@ -252,15 +279,16 @@ function parseSchemaForCompletions(schemaText: string): {
       i++;
     }
     const body = schemaText.slice(start, i - 1);
-    const cols: string[] = [];
     for (const line of body.split("\n")) {
       const t = line.trim();
       if (!t || /^(PRIMARY|FOREIGN|UNIQUE|CHECK|CONSTRAINT|INDEX)/i.test(t)) continue;
       const col = t.match(/^"?([\w]+)"?\s+\w/);
-      if (col) cols.push(col[1]);
+      if (col && !columnsByTable[tableName].includes(col[1])) {
+        columnsByTable[tableName].push(col[1]);
+      }
     }
-    columnsByTable[tableName] = cols;
   }
+
   return { tables, columnsByTable };
 }
 
@@ -294,7 +322,7 @@ function getCaretViewportCoords(ta: HTMLTextAreaElement): { x: number; y: number
   };
 }
 
-type ACItem = { label: string; kind: "keyword" | "table" | "column" };
+type ACItem = { label: string; kind: "keyword" | "table" | "column"; table?: string };
 
 function SQLAutoCompleteEditor({
   value,
@@ -324,8 +352,8 @@ function SQLAutoCompleteEditor({
   const allItems = useMemo<ACItem[]>(() => [
     ...SQL_KEYWORDS.map((k) => ({ label: k, kind: "keyword" as const })),
     ...tables.map((t) => ({ label: t, kind: "table" as const })),
-    ...Object.entries(columnsByTable).flatMap(([, cols]) =>
-      cols.map((c) => ({ label: c, kind: "column" as const }))
+    ...Object.entries(columnsByTable).flatMap(([tbl, cols]) =>
+      cols.map((c) => ({ label: c, kind: "column" as const, table: tbl }))
     ),
   ], [tables, columnsByTable]);
 
@@ -422,7 +450,7 @@ function SQLAutoCompleteEditor({
         >
           {items.map((it, i) => (
             <div
-              key={it.label + it.kind}
+              key={`${it.kind}:${it.label}:${i}`}
               className={cn(
                 "flex items-center justify-between gap-2 px-3 py-1.5 text-sm font-mono cursor-pointer select-none",
                 i === selIdx
@@ -431,8 +459,13 @@ function SQLAutoCompleteEditor({
               )}
               onMouseDown={(e) => { e.preventDefault(); acceptSuggestion(it.label); }}
             >
-              <span className={cn("truncate font-mono", i === selIdx ? "text-brand-300" : kindColor[it.kind])}>
-                {it.label}
+              <span className="flex items-baseline gap-1.5 truncate min-w-0">
+                <span className={cn("truncate font-mono", i === selIdx ? "text-brand-300" : kindColor[it.kind])}>
+                  {it.label}
+                </span>
+                {it.kind === "column" && it.table && (
+                  <span className="text-2xs text-fg-subtle font-sans shrink-0">{it.table}</span>
+                )}
               </span>
               <span className="text-2xs text-fg-subtle shrink-0 font-sans px-1 py-0.5 rounded bg-surface-100">
                 {kindBadge[it.kind]}
@@ -455,6 +488,8 @@ function AIAssistPanel({
   setMessages,
   onUseSQL,
   onExecute,
+  onClear,
+  onConversationUpdate,
 }: {
   dbType: string;
   dbVersion: string;
@@ -465,6 +500,8 @@ function AIAssistPanel({
   setMessages: React.Dispatch<React.SetStateAction<AIChatMessage[]>>;
   onUseSQL: (sql: string) => void;
   onExecute: (sql: string) => void;
+  onClear?: () => void;
+  onConversationUpdate?: (msgs: AIChatMessage[]) => void;
 }) {
   const [prompt, setPrompt] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -485,17 +522,6 @@ function AIAssistPanel({
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
-
-  // Reset chat when cluster or database changes
-  const prevClusterRef = useRef(clusterId);
-  const prevDatabaseRef = useRef(database);
-  useEffect(() => {
-    if (prevClusterRef.current !== clusterId || prevDatabaseRef.current !== database) {
-      setMessages([]);
-      prevClusterRef.current = clusterId;
-      prevDatabaseRef.current = database;
-    }
-  }, [clusterId, database, setMessages]);
 
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim() || !clusterId || streaming) return;
@@ -562,9 +588,14 @@ function AIAssistPanel({
       });
     } finally {
       setStreaming(false);
-      setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)));
+      setMessages((prev) => {
+        const finalMsgs = prev.map((m) => (m.streaming ? { ...m, streaming: false } : m));
+        // Notify parent to persist conversation to DB
+        onConversationUpdate?.(finalMsgs);
+        return finalMsgs;
+      });
     }
-  }, [prompt, clusterId, database, isRedis, dbType, dbVersion, clusterName, schemaText, refetchSchema, messages, streaming]);
+  }, [prompt, clusterId, database, isRedis, dbType, dbVersion, clusterName, schemaText, refetchSchema, messages, streaming, onConversationUpdate]);
 
   const handleStop = () => { abortRef.current.abort = true; };
 
@@ -689,44 +720,6 @@ function AIAssistPanel({
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Schema status bar */}
-      <div className="shrink-0 px-3 py-1.5 border-b border-surface-border bg-surface-50/60 flex items-center gap-2">
-        {!clusterId ? (
-          <span className="text-2xs text-fg-subtle">No cluster selected</span>
-        ) : isRedis ? (
-          <span className="text-2xs text-red-400 flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-red-400 inline-block" />
-            Redis connected
-          </span>
-        ) : !database ? (
-          <span className="text-2xs text-yellow-500/90 flex items-center gap-1.5">
-            <FontAwesomeIcon icon={faDatabase} className="text-xs" />
-            Select a database for full schema context
-          </span>
-        ) : schemaLoading ? (
-          <span className="text-2xs text-fg-subtle flex items-center gap-1.5">
-            <FontAwesomeIcon icon={faSpinner} className="animate-spin text-xs" />
-            Loading schema…
-          </span>
-        ) : schemaError ? (
-          <span className="text-2xs text-amber-400 flex items-center gap-1.5">
-            <FontAwesomeIcon icon={faTriangleExclamation} className="text-xs" />
-            Schema fetch failed
-            <button onClick={() => refetchSchema()} className="underline hover:text-amber-300 ml-1">retry</button>
-          </span>
-        ) : schemaText ? (
-          <span className="text-2xs text-green-500 flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
-            Schema loaded · <strong>{tableCount}</strong> table{tableCount !== 1 ? "s" : ""} in &ldquo;{database}&rdquo;
-          </span>
-        ) : (
-          <span className="text-2xs text-fg-subtle flex items-center gap-1.5">
-            No tables yet in &ldquo;{database}&rdquo;
-            <button onClick={() => refetchSchema()} className="underline hover:text-fg-base ml-1">refresh</button>
-          </span>
-        )}
-        <span className="ml-auto text-2xs bg-brand-500/10 text-brand-400 px-1.5 py-0.5 rounded font-medium">Gemini</span>
-      </div>
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 min-h-0">
@@ -738,14 +731,13 @@ function AIAssistPanel({
               </div>
               <div>
                 <p className="text-xs font-semibold text-fg-base">PocketDB AI Assistant</p>
-                <p className="text-2xs text-fg-muted">Powered by Gemini</p>
               </div>
             </div>
             <p className="text-xs text-fg-muted leading-relaxed mb-3">
-              {schemaText
-                ? `I know your full schema — ${tableCount} table${tableCount !== 1 ? "s" : ""} in "${database}". Ask anything!`
-                : isRedis
+              {isRedis
                 ? "Ask about Redis commands, keys, data structures, or performance."
+                : database
+                ? `Connected to "${database}". Ask about your schema, queries, or design.`
                 : "Ask about SQL queries, schema design, or your database."}
             </p>
             <div className="grid gap-1.5">
@@ -773,7 +765,7 @@ function AIAssistPanel({
               {messages.filter((m) => m.role === "user").length} message{messages.filter((m) => m.role === "user").length !== 1 ? "s" : ""}
             </span>
             <button
-              onClick={() => setMessages([])}
+              onClick={() => { setMessages([]); onClear?.(); }}
               className="text-2xs text-fg-subtle hover:text-red-400 transition-colors"
             >
               Clear chat
@@ -1425,7 +1417,13 @@ export default function QueryEditorPage() {
   const setSelectedClusterId = useUIStore((s) => s.setSelectedClusterId);
   const [query, setQuery]       = useState("SELECT version();");
   const [result, setResult]     = useState<QueryResult | null>(null);
-  const [history, setHistory]   = useState<{ query: string; time: Date; result: QueryResult }[]>(() => []);
+  // ── DB-backed history state ──────────────────────────────────────────────
+  const [historyItems, setHistoryItems] = useState<QueryHistoryItem[]>([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyPage, setHistoryPage]   = useState(1);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const HISTORY_PAGE_SIZE = 20;
+  // ─────────────────────────────────────────────────────────────────────────
   const [copied, setCopied]     = useState(false);
   const [rightPanel, setRightPanel] = useState<null | "history" | "ai" | "browser" | "interactive">(null);
   const [showExitModal, setShowExitModal] = useState(false);
@@ -1588,36 +1586,48 @@ export default function QueryEditorPage() {
     [acSchemaData?.schema_text],
   );
 
-  const historyStorageKey = useMemo(
-    () => selectedCluster ? `pocketdb_history_${selectedCluster.name}` : null,
-    [selectedCluster],
-  );
+  // ── Load history from DB when cluster/database/page changes ──────────────
+  const loadHistory = useCallback((clusterId: string, db: string, page: number) => {
+    if (!clusterId) { setHistoryItems([]); setHistoryTotal(0); return; }
+    setHistoryLoading(true);
+    queryHistoryApi.list(clusterId, db, page, HISTORY_PAGE_SIZE)
+      .then((data: QueryHistoryPage) => {
+        setHistoryItems(data.items);
+        setHistoryTotal(data.total);
+        setHistoryPage(data.page);
+      })
+      .catch(() => { setHistoryItems([]); setHistoryTotal(0); })
+      .finally(() => setHistoryLoading(false));
+  }, []);
 
-  // Load history from localStorage when cluster changes
   useEffect(() => {
-    if (!historyStorageKey) { setHistory([]); return; }
-    try {
-      const raw = localStorage.getItem(historyStorageKey);
-      if (raw) {
-        const parsed = JSON.parse(raw) as { query: string; time: string; result: QueryResult }[];
-        setHistory(parsed.map((e) => ({ ...e, time: new Date(e.time) })));
-      } else {
-        setHistory([]);
-      }
-    } catch {
-      setHistory([]);
-    }
-  }, [historyStorageKey]);
+    setHistoryPage(1);
+    loadHistory(selectedClusterId, selectedDatabase, 1);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedClusterId, selectedDatabase]);
+  // ─────────────────────────────────────────────────────────────────────────
 
-  // Persist history to localStorage on every change
+  // ── Load / save AI conversation from DB ──────────────────────────────────
   useEffect(() => {
-    if (!historyStorageKey) return;
-    try {
-      localStorage.setItem(historyStorageKey, JSON.stringify(
-        history.map((e) => ({ ...e, time: e.time.toISOString() })),
-      ));
-    } catch { /* storage full — silently skip */ }
-  }, [history, historyStorageKey]);
+    if (!selectedClusterId) { setAiMessages([]); return; }
+    aiConversationApi.get(selectedClusterId, selectedDatabase)
+      .then((data: { messages_json?: AIChatMessage[] } | null) => {
+        setAiMessages(data?.messages_json ?? []);
+      })
+      .catch(() => setAiMessages([]));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedClusterId, selectedDatabase]);
+
+  const handleAiConversationUpdate = useCallback((msgs: AIChatMessage[]) => {
+    if (!selectedClusterId) return;
+    aiConversationApi.upsert(selectedClusterId, selectedDatabase, msgs).catch(() => { /* silently ignore */ });
+  }, [selectedClusterId, selectedDatabase]);
+
+  const handleClearAiConversation = useCallback(() => {
+    if (!selectedClusterId) return;
+    aiConversationApi.clear(selectedClusterId, selectedDatabase).catch(() => { /* silently ignore */ });
+  }, [selectedClusterId, selectedDatabase]);
+  // ─────────────────────────────────────────────────────────────────────────
 
   const handleSelectCluster = (id: string) => {
     setSelectedClusterId(id || null);
@@ -1640,9 +1650,21 @@ export default function QueryEditorPage() {
       { clusterId: selectedClusterId, query: sql, database: selectedDatabase || undefined },
       {
         onSuccess: (data) => {
-          void (Date.now() - runStartTime); // track elapsed for future use
+          void (Date.now() - runStartTime);
           setResult(data);
-          setHistory((h) => [{ query: sql, time: new Date(), result: data }, ...h.slice(0, 29)]);
+          // Save to DB history
+          queryHistoryApi.create({
+            cluster_id: selectedClusterId,
+            database_name: selectedDatabase || null,
+            query_text: sql,
+            execution_time_ms: data.execution_time_ms ?? null,
+            row_count: data.row_count ?? null,
+            had_error: !!data.error,
+            error_message: data.error ?? null,
+          }).then(() => {
+            // Reload first page so the new entry appears at top
+            loadHistory(selectedClusterId, selectedDatabase, 1);
+          }).catch(() => { /* silently ignore save failure */ });
           if (selectedDatabase) {
             queryClient.invalidateQueries({ queryKey: clusterKeys.schema(selectedClusterId, selectedDatabase) });
           }
@@ -1658,9 +1680,22 @@ export default function QueryEditorPage() {
             }];
           });
         },
+        onError: (err) => {
+          // Save error entry to history too
+          queryHistoryApi.create({
+            cluster_id: selectedClusterId,
+            database_name: selectedDatabase || null,
+            query_text: sql,
+            execution_time_ms: null,
+            row_count: null,
+            had_error: true,
+            error_message: err.message,
+          }).then(() => loadHistory(selectedClusterId, selectedDatabase, 1))
+            .catch(() => { /* ignore */ });
+        },
       },
     );
-  }, [selectedClusterId, query, selectedDatabase, execQuery, isRecording, selectedCluster, dbType, queryClient]);
+  }, [selectedClusterId, query, selectedDatabase, execQuery, isRecording, selectedCluster, dbType, queryClient, loadHistory]);
 
   const handleCopy = useCallback(() => {
     if (!result) return;
@@ -1675,11 +1710,6 @@ export default function QueryEditorPage() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }, [result, isRedis]);
-
-  const relTime = (d: Date) => {
-    const s = Math.floor((Date.now() - d.getTime()) / 1000);
-    return s < 60 ? `${s}s ago` : `${Math.floor(s / 60)}m ago`;
-  };
 
   // ── Session recording ───────────────────────────────────────────────────
   const exportSessionPDF = useCallback(() => {
@@ -1820,7 +1850,6 @@ export default function QueryEditorPage() {
                   {
                     onSuccess: (data) => {
                       setResult(data);
-                      setHistory((h) => [{ query, time: new Date(), result: data }, ...h.slice(0, 29)]);
                     },
                   },
                 );
@@ -1847,9 +1876,9 @@ export default function QueryEditorPage() {
           >
             <FontAwesomeIcon icon={faClockRotateLeft} className="text-xs" />
             <span className="hidden sm:inline">History</span>
-            {history.length > 0 && (
+            {historyTotal > 0 && (
               <span className="text-xs bg-brand-500/20 text-brand-400 px-1.5 rounded-full leading-none">
-                {history.length}
+                {historyTotal > 999 ? "999+" : historyTotal}
               </span>
             )}
           </button>
@@ -1890,7 +1919,6 @@ export default function QueryEditorPage() {
           >
             <FontAwesomeIcon icon={faRobot} className="text-xs" />
             <span className="hidden sm:inline">AI</span>
-            <span className="text-xs bg-brand-500/20 text-brand-400 px-1 rounded leading-none font-medium">✨</span>
           </button>
 
           {/* Interactive Mode button */}
@@ -2218,38 +2246,124 @@ export default function QueryEditorPage() {
 
             {/* History content */}
             {rightPanel === "history" && (
-              <div className="flex-1 overflow-y-auto p-1.5">
-                {history.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center gap-3 text-center px-4">
-                    <FontAwesomeIcon icon={faClockRotateLeft} className="text-fg-subtle/40 text-2xl" />
-                    <p className="text-xs text-fg-subtle">Run a query to build history</p>
-                  </div>
-                ) : (
-                  <div className="space-y-0.5">
-                    <div className="flex justify-end px-1 pb-1">
-                      <button onClick={() => setHistory([])} className="text-2xs text-red-400 hover:text-red-300 transition-colors">
-                        Clear all
-                      </button>
+              <div className="flex flex-col h-full overflow-hidden">
+                {/* Header strip with clear button */}
+                <div className="shrink-0 flex items-center justify-between px-3 py-1.5 border-b border-surface-border bg-surface-50/60">
+                  <span className="text-2xs text-fg-subtle">
+                    {!selectedClusterId
+                      ? "Select a cluster to view history"
+                      : historyTotal === 0
+                      ? "No history yet"
+                      : `${historyTotal} entr${historyTotal !== 1 ? "ies" : "y"}`
+                    }
+                    {selectedDatabase ? ` · ${selectedDatabase}` : ""}
+                  </span>
+                  {historyTotal > 0 && selectedClusterId && (
+                    <button
+                      onClick={() => {
+                        queryHistoryApi.clear(selectedClusterId, selectedDatabase)
+                          .then(() => { setHistoryItems([]); setHistoryTotal(0); setHistoryPage(1); })
+                          .catch(() => toast.error("Failed to clear history"));
+                      }}
+                      className="text-2xs text-red-400 hover:text-red-300 transition-colors"
+                    >
+                      Clear all
+                    </button>
+                  )}
+                </div>
+
+                {/* Items */}
+                <div className="flex-1 overflow-y-auto min-h-0">
+                  {historyLoading && historyItems.length === 0 ? (
+                    <div className="h-full flex items-center justify-center gap-2">
+                      <FontAwesomeIcon icon={faSpinner} className="animate-spin text-brand-400 text-sm" />
+                      <span className="text-xs text-fg-subtle">Loading…</span>
                     </div>
-                    {history.map((item, i) => (
-                      <button
-                        key={i}
-                        onClick={() => { setQuery(item.query); setResult(item.result); }}
-                        className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-surface-100 transition-colors group"
-                      >
-                        <p className="text-2xs text-fg-subtle mb-0.5">{relTime(item.time)}</p>
-                        <p className="text-xs text-fg-muted group-hover:text-fg-base font-mono truncate">
-                          {item.query.replace(/\n/g, " ")}
-                        </p>
-                        {item.result.error ? (
-                          <p className="text-2xs text-red-400 mt-0.5 truncate">Error: {item.result.error}</p>
-                        ) : (
-                          <p className="text-2xs text-green-500 mt-0.5">
-                            {item.result.row_count} row{item.result.row_count !== 1 ? "s" : ""} · {item.result.execution_time_ms}ms
-                          </p>
-                        )}
-                      </button>
-                    ))}
+                  ) : historyItems.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center gap-3 text-center px-4">
+                      <FontAwesomeIcon icon={faClockRotateLeft} className="text-fg-subtle/40 text-2xl" />
+                      <p className="text-xs text-fg-subtle">
+                        {selectedClusterId ? "Run a query to build history" : "Select a cluster first"}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-surface-border/40">
+                      {historyItems.map((item) => {
+                        const execAt = new Date(item.executed_at);
+                        const now = Date.now();
+                        const diffSec = Math.floor((now - execAt.getTime()) / 1000);
+                        const relTime = diffSec < 60 ? `${diffSec}s ago`
+                          : diffSec < 3600 ? `${Math.floor(diffSec / 60)}m ago`
+                          : diffSec < 86400 ? `${Math.floor(diffSec / 3600)}h ago`
+                          : execAt.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+                        return (
+                          <button
+                            key={item.id}
+                            onClick={() => setQuery(item.query_text)}
+                            className="w-full text-left px-3 py-2.5 hover:bg-surface-100 transition-colors group"
+                          >
+                            {/* Top row: timestamp + stats */}
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-2xs text-fg-subtle tabular-nums">{relTime}</span>
+                              {item.had_error ? (
+                                <span className="ml-auto text-2xs text-red-400 font-medium">error</span>
+                              ) : (
+                                <span className="ml-auto text-2xs text-fg-subtle tabular-nums">
+                                  {item.row_count !== null && (
+                                    <span className="text-green-400 mr-1.5">{item.row_count} row{item.row_count !== 1 ? "s" : ""}</span>
+                                  )}
+                                  {item.execution_time_ms !== null && `${item.execution_time_ms}ms`}
+                                </span>
+                              )}
+                            </div>
+                            {/* Query text */}
+                            <p className="text-xs text-fg-muted group-hover:text-fg-base font-mono leading-relaxed line-clamp-2 break-all">
+                              {item.query_text.replace(/\s+/g, " ").trim()}
+                            </p>
+                            {/* Error message */}
+                            {item.had_error && item.error_message && (
+                              <p className="text-2xs text-red-400/80 mt-0.5 truncate">{item.error_message}</p>
+                            )}
+                          </button>
+                        );
+                      })}
+                      {historyLoading && (
+                        <div className="flex justify-center py-2">
+                          <FontAwesomeIcon icon={faSpinner} className="animate-spin text-brand-400 text-xs" />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Pagination footer */}
+                {historyTotal > HISTORY_PAGE_SIZE && (
+                  <div className="shrink-0 flex items-center justify-between px-3 py-2 border-t border-surface-border bg-surface-50/60">
+                    <button
+                      disabled={historyPage <= 1 || historyLoading}
+                      onClick={() => {
+                        const p = historyPage - 1;
+                        setHistoryPage(p);
+                        loadHistory(selectedClusterId, selectedDatabase, p);
+                      }}
+                      className="text-2xs px-2 py-1 rounded border border-surface-border text-fg-muted hover:text-fg-base hover:border-brand-500/40 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    >
+                      ← Newer
+                    </button>
+                    <span className="text-2xs text-fg-subtle tabular-nums">
+                      {historyPage} / {Math.ceil(historyTotal / HISTORY_PAGE_SIZE)}
+                    </span>
+                    <button
+                      disabled={historyPage >= Math.ceil(historyTotal / HISTORY_PAGE_SIZE) || historyLoading}
+                      onClick={() => {
+                        const p = historyPage + 1;
+                        setHistoryPage(p);
+                        loadHistory(selectedClusterId, selectedDatabase, p);
+                      }}
+                      className="text-2xs px-2 py-1 rounded border border-surface-border text-fg-muted hover:text-fg-base hover:border-brand-500/40 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Older →
+                    </button>
                   </div>
                 )}
               </div>
@@ -2268,6 +2382,8 @@ export default function QueryEditorPage() {
                   setMessages={setAiMessages}
                   onUseSQL={(sql) => { setQuery(sql); toast.success("SQL inserted into editor"); }}
                   onExecute={(sql) => { setQuery(sql); handleRun(sql); }}
+                  onClear={handleClearAiConversation}
+                  onConversationUpdate={handleAiConversationUpdate}
                 />
               </div>
             )}

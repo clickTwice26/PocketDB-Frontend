@@ -326,5 +326,49 @@ export const erdDiagramApi = {
     api.delete(`/erd-diagrams/${id}`),
 };
 
+// ─── Query History API ────────────────────────────────────────────────────────
+
+export const queryHistoryApi = {
+  list: (clusterId: string, databaseName: string, page = 1, pageSize = 20) =>
+    api.get("/query-history", {
+      params: { cluster_id: clusterId, database_name: databaseName, page, page_size: pageSize },
+    }).then((r) => r.data),
+
+  create: (data: {
+    cluster_id: string;
+    database_name?: string | null;
+    query_text: string;
+    execution_time_ms?: number | null;
+    row_count?: number | null;
+    had_error: boolean;
+    error_message?: string | null;
+  }) => api.post("/query-history", data).then((r) => r.data),
+
+  clear: (clusterId: string, databaseName: string) =>
+    api.delete("/query-history", {
+      params: { cluster_id: clusterId, database_name: databaseName },
+    }),
+};
+
+export const aiConversationApi = {
+  get: (clusterId: string, databaseName: string) =>
+    api.get("/ai-conversations", {
+      params: { cluster_id: clusterId, database_name: databaseName },
+    }).then((r) => r.data),
+
+  upsert: (clusterId: string, databaseName: string, messages: { role: string; content: string }[]) =>
+    api.put("/ai-conversations", {
+      cluster_id: clusterId,
+      database_name: databaseName,
+      messages_json: messages,
+    }).then((r) => r.data),
+
+  clear: (clusterId: string, databaseName: string) =>
+    api.delete("/ai-conversations", {
+      params: { cluster_id: clusterId, database_name: databaseName },
+    }),
+};
+
+
 
 

@@ -160,6 +160,45 @@ export interface RestoreResult {
   error?: string;
 }
 
+// ─── Query History ───────────────────────────────────────────────────────────
+
+export interface QueryHistoryItem {
+  id: string;
+  cluster_id: string;
+  database_name: string | null;
+  query_text: string;
+  execution_time_ms: number | null;   // float ms
+  row_count: number | null;
+  had_error: boolean;
+  error_message: string | null;
+  executed_at: string;
+}
+
+export interface QueryHistoryPage {
+  items: QueryHistoryItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  has_next: boolean;
+}
+
+// ─── AI Conversations ────────────────────────────────────────────────────────
+
+export interface AIChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  streaming?: boolean;
+}
+
+export interface AIConversation {
+  id: string;
+  cluster_id: string;
+  database_name: string;
+  messages_json: AIChatMessage[];
+  updated_at: string;
+  created_at: string;
+}
+
 // ─── ERD Diagrams ───────────────────────────────────────────────────────────
 
 export interface ERDDiagram {
