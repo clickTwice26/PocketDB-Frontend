@@ -12,13 +12,13 @@ import {
   faChartBar, faTableCells, faChartLine, faHashtag,
 } from "@fortawesome/free-solid-svg-icons";
 import { useQueryClient } from "@tanstack/react-query";
-import { useClusters, useExecuteQuery, useDatabases, useSchemaContext, clusterKeys } from "@/hooks/useClusters";
+import { useClusters, useExecuteUserDbQuery, useUserDatabases, useSchemaContext, clusterKeys } from "@/hooks/useClusters";
 import Topbar from "@/components/layout/Topbar";
 import SchemaBrowserPanel from "@/components/clusters/SchemaBrowserPanel";
 import ERDDiagramModal from "@/components/clusters/ERDDiagramModal";
 import { useUIStore } from "@/store/ui";
 import { cn } from "@/lib/utils";
-import type { ClusterListItem, QueryResult, QueryHistoryItem, QueryHistoryPage } from "@/types";
+import type { QueryResult, QueryHistoryItem, QueryHistoryPage, UserDatabase } from "@/types";
 import { aiApi, browserApi, queryHistoryApi, aiConversationApi } from "@/lib/api";
 import toast from "react-hot-toast";
 
@@ -1124,14 +1124,14 @@ function InteractiveModePanel({
   );
 }
 
-// ─── ClusterPicker ───────────────────────────────────────────────────────────
+// ─── UserDatabasePicker ───────────────────────────────────────────────────────
 
-function ClusterPicker({
-  clusters,
+function UserDatabasePicker({
+  databases,
   value,
   onChange,
 }: {
-  clusters: ClusterListItem[];
+  databases: UserDatabase[];
   value: string;
   onChange: (id: string) => void;
 }) {
@@ -1151,9 +1151,9 @@ function ClusterPicker({
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  const selected = clusters.find((c) => c.id === value) ?? null;
-  const filtered = clusters.filter((c) =>
-    c.name.toLowerCase().includes(search.toLowerCase())
+  const selected = databases.find((d) => d.id === value) ?? null;
+  const filtered = databases.filter((d) =>
+    d.database_name.toLowerCase().includes(search.toLowerCase())
   );
 
   const dbMeta = (type: string) =>
@@ -1167,7 +1167,6 @@ function ClusterPicker({
 
   return (
     <div ref={ref} className="relative flex-1 max-w-xs">
-      {/* Trigger */}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -1180,24 +1179,24 @@ function ClusterPicker({
         {selected ? (
           <>
             <FontAwesomeIcon
-              icon={dbMeta(selected.db_type ?? "postgres").icon}
-              className={cn("text-xs shrink-0", dbMeta(selected.db_type ?? "postgres").color)}
+              icon={dbMeta(selected.db_type).icon}
+              className={cn("text-xs shrink-0", dbMeta(selected.db_type).color)}
             />
-            <span className="flex-1 text-left truncate text-xs text-fg-base font-medium">
-              {selected.name}
+            <span className="flex-1 text-left truncate text-xs text-fg-base font-medium font-mono">
+              {selected.database_name}
             </span>
             <span className={cn(
               "text-xs font-semibold px-1.5 py-0.5 rounded shrink-0",
-              dbMeta(selected.db_type ?? "postgres").bg,
-              dbMeta(selected.db_type ?? "postgres").color,
+              dbMeta(selected.db_type).bg,
+              dbMeta(selected.db_type).color,
             )}>
-              {(selected.db_type ?? "postgres").toUpperCase()} {selected.db_version}
+              {selected.db_type.toUpperCase()}
             </span>
           </>
         ) : (
           <>
             <FontAwesomeIcon icon={faDatabase} className="text-fg-subtle text-xs shrink-0" />
-            <span className="flex-1 text-left text-xs text-fg-subtle">— Select a running cluster —</span>
+            <span className="flex-1 text-left text-xs text-fg-subtle">— Select your database —</span>
           </>
         )}
         <FontAwesomeIcon
@@ -1206,36 +1205,34 @@ function ClusterPicker({
         />
       </button>
 
-      {/* Dropdown */}
       {open && (
         <div className="absolute left-0 top-[calc(100%+4px)] z-50 w-full min-w-[260px] rounded-xl border border-surface-border bg-surface shadow-xl shadow-black/30 overflow-hidden">
-          {/* Search */}
           <div className="flex items-center gap-2 px-2.5 py-2 border-b border-surface-border">
             <FontAwesomeIcon icon={faMagnifyingGlass} className="text-fg-subtle text-xs shrink-0" />
             <input
               autoFocus
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search clusters…"
+              placeholder="Search your databases…"
               className="flex-1 bg-transparent text-xs text-fg-base placeholder:text-fg-subtle outline-none"
             />
           </div>
 
           <div className="max-h-64 overflow-y-auto py-1">
-            {clusters.length === 0 && (
-              <p className="px-3 py-3 text-xs text-fg-subtle text-center">No running clusters</p>
+            {databases.length === 0 && (
+              <p className="px-3 py-3 text-xs text-fg-subtle text-center">No databases yet — create one first</p>
             )}
-            {filtered.length === 0 && clusters.length > 0 && (
-              <p className="px-3 py-3 text-xs text-fg-subtle text-center">No clusters found</p>
+            {filtered.length === 0 && databases.length > 0 && (
+              <p className="px-3 py-3 text-xs text-fg-subtle text-center">No databases match</p>
             )}
-            {filtered.map((c) => {
-              const m = dbMeta(c.db_type ?? "postgres");
-              const isActive = c.id === value;
+            {filtered.map((d) => {
+              const m = dbMeta(d.db_type);
+              const isActive = d.id === value;
               return (
                 <button
-                  key={c.id}
+                  key={d.id}
                   type="button"
-                  onClick={() => handleSelect(c.id)}
+                  onClick={() => handleSelect(d.id)}
                   className={cn(
                     "w-full flex items-center gap-2.5 px-3 py-2 text-xs transition-colors group",
                     isActive
@@ -1243,17 +1240,12 @@ function ClusterPicker({
                       : "text-fg-muted hover:bg-surface-100 hover:text-fg-base",
                   )}
                 >
-                  <FontAwesomeIcon
-                    icon={m.icon}
-                    className={cn("text-xs shrink-0", isActive ? "text-brand-400" : m.color)}
-                  />
-                  <span className="flex-1 text-left truncate font-medium">{c.name}</span>
+                  <FontAwesomeIcon icon={m.icon} className={cn("text-xs shrink-0", isActive ? "text-brand-400" : m.color)} />
+                  <span className="flex-1 text-left truncate font-mono">{d.database_name}</span>
                   <span className={cn("text-xs font-semibold px-1.5 py-0.5 rounded shrink-0", m.bg, m.color)}>
-                    {(c.db_type ?? "postgres").toUpperCase()} {c.db_version}
+                    {d.db_type.toUpperCase()}
                   </span>
-                  {isActive && (
-                    <FontAwesomeIcon icon={faCheck} className="text-brand-400 text-xs shrink-0" />
-                  )}
+                  {isActive && <FontAwesomeIcon icon={faCheck} className="text-brand-400 text-xs shrink-0" />}
                 </button>
               );
             })}
@@ -1264,157 +1256,14 @@ function ClusterPicker({
   );
 }
 
-// ─── DatabasePicker ──────────────────────────────────────────────────────────
-
-function DatabasePicker({
-  databases,
-  value,
-  loading,
-  onOpen,
-  onChange,
-}: {
-  databases: { name: string; size?: string }[];
-  value: string;
-  loading: boolean;
-  onOpen: () => void;
-  onChange: (db: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
-
-  // close on outside click
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-        setSearch("");
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
-
-  const filtered = databases.filter((db) =>
-    db.name.toLowerCase().includes(search.toLowerCase())
-  );
-
-  const handleOpen = () => {
-    onOpen();
-    setOpen((v) => !v);
-  };
-
-  const handleSelect = (name: string) => {
-    setOpen(false);
-    setSearch("");
-    onChange(name);
-  };
-
-  return (
-    <div ref={ref} className="relative">
-      {/* Trigger button */}
-      <button
-        type="button"
-        onClick={handleOpen}
-        className={cn(
-          "flex items-center gap-2 h-8 pl-2.5 pr-2 rounded-lg border text-sm transition-colors min-w-[160px] max-w-[220px]",
-          "bg-surface border-surface-border hover:border-brand-500/60 hover:bg-surface-100",
-          open && "border-brand-500 bg-surface-100",
-        )}
-      >
-        <FontAwesomeIcon icon={faDatabase} className="text-brand-400 text-xs shrink-0" />
-        <span className={cn("flex-1 text-left truncate text-xs", value ? "text-fg-base" : "text-fg-subtle")}>
-          {value || "— database —"}
-        </span>
-        {loading ? (
-          <FontAwesomeIcon icon={faSpinner} className="text-fg-subtle text-xs animate-spin shrink-0" />
-        ) : (
-          <FontAwesomeIcon
-            icon={faChevronDown}
-            className={cn("text-fg-subtle text-xs shrink-0 transition-transform", open && "rotate-180")}
-          />
-        )}
-      </button>
-
-      {/* Dropdown panel */}
-      {open && (
-        <div className="absolute left-0 top-[calc(100%+4px)] z-50 w-56 rounded-xl border border-surface-border bg-surface shadow-xl shadow-black/30 overflow-hidden">
-          {/* Search */}
-          <div className="flex items-center gap-2 px-2.5 py-2 border-b border-surface-border">
-            <FontAwesomeIcon icon={faMagnifyingGlass} className="text-fg-subtle text-xs shrink-0" />
-            <input
-              autoFocus
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search databases…"
-              className="flex-1 bg-transparent text-xs text-fg-base placeholder:text-fg-subtle outline-none"
-            />
-          </div>
-
-          {/* List */}
-          <div className="max-h-56 overflow-y-auto py-1">
-            {/* Clear / none option */}
-            <button
-              type="button"
-              onClick={() => handleSelect("")}
-              className={cn(
-                "w-full flex items-center gap-2.5 px-3 py-1.5 text-xs transition-colors",
-                !value ? "text-brand-400 bg-brand-500/10" : "text-fg-subtle hover:bg-surface-100 hover:text-fg-base",
-              )}
-            >
-              <span className="w-4" />
-              <span className="italic">— none —</span>
-            </button>
-
-            {filtered.length === 0 && (
-              <p className="px-3 py-3 text-xs text-fg-subtle text-center">No databases found</p>
-            )}
-
-            {filtered.map((db) => (
-              <button
-                key={db.name}
-                type="button"
-                onClick={() => handleSelect(db.name)}
-                className={cn(
-                  "w-full flex items-center gap-2.5 px-3 py-1.5 text-xs transition-colors group",
-                  db.name === value
-                    ? "text-brand-400 bg-brand-500/10"
-                    : "text-fg-muted hover:bg-surface-100 hover:text-fg-base",
-                )}
-              >
-                <FontAwesomeIcon
-                  icon={faDatabase}
-                  className={cn(
-                    "text-xs shrink-0",
-                    db.name === value ? "text-brand-400" : "text-fg-subtle group-hover:text-brand-400",
-                  )}
-                />
-                <span className="flex-1 text-left truncate font-mono">{db.name}</span>
-                {db.size && (
-                  <span className="text-xs text-fg-subtle shrink-0">{db.size}</span>
-                )}
-                {db.name === value && (
-                  <FontAwesomeIcon icon={faCheck} className="text-brand-400 text-xs shrink-0" />
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function QueryEditorPage() {
-  const { data: clusters = [] } = useClusters("running");
-  const { mutate: execQuery, isPending } = useExecuteQuery();
+  const { data: userDatabases = [] } = useUserDatabases();
+  const { mutate: execUserDbQuery, isPending } = useExecuteUserDbQuery();
   const queryClient = useQueryClient();
 
-  const selectedClusterId = useUIStore((s) => s.selectedClusterId) ?? "";
-  const setSelectedClusterId = useUIStore((s) => s.setSelectedClusterId);
+  const [selectedDbId, setSelectedDbId] = useState<string>("");
   const [query, setQuery]       = useState("SELECT version();");
   const [result, setResult]     = useState<QueryResult | null>(null);
   // ── DB-backed history state ──────────────────────────────────────────────
@@ -1427,7 +1276,6 @@ export default function QueryEditorPage() {
   const [copied, setCopied]     = useState(false);
   const [rightPanel, setRightPanel] = useState<null | "history" | "ai" | "browser" | "interactive">(null);
   const [showExitModal, setShowExitModal] = useState(false);
-  const [selectedDatabase, setSelectedDatabase] = useState<string>("");
   const [isRecording, setIsRecording] = useState(false);
   const [sessionRecords, setSessionRecords] = useState<
     { query: string; database: string; clusterName: string; dbType: string; time: Date; result: QueryResult }[]
@@ -1565,18 +1413,19 @@ export default function QueryEditorPage() {
     setShowExitModal(false);
   }, []);
 
-  const selectedCluster = useMemo(
-    () => clusters.find((c: ClusterListItem) => c.id === selectedClusterId) ?? null,
-    [clusters, selectedClusterId],
+  // Derived from selected user database
+  const selectedUserDb = useMemo(
+    () => (userDatabases as UserDatabase[]).find((d) => d.id === selectedDbId) ?? null,
+    [userDatabases, selectedDbId],
   );
 
-  const dbType  = ((selectedCluster?.db_type ?? "postgres") as DbType);
-  const isRedis = dbType === "redis";
+  const selectedClusterId = selectedUserDb?.cluster_id ?? "";
+  const selectedDatabase  = selectedUserDb?.database_name ?? "";
+  const dbType  = ((selectedUserDb?.db_type ?? "postgres") as DbType);
+  const isRedis = false; // User databases are only postgres/mysql
   const meta    = DB_META[dbType] ?? DB_META.postgres;
 
-  const { data: databases = [], refetch: refetchDatabases } = useDatabases(isRedis ? "" : (selectedClusterId ?? ""));
-
-  // Schema for autocomplete
+  // Schema for autocomplete (scoped to user's db)
   const { data: acSchemaData } = useSchemaContext(
     isRedis ? "" : selectedClusterId,
     selectedDatabase,
@@ -1604,7 +1453,7 @@ export default function QueryEditorPage() {
     setHistoryPage(1);
     loadHistory(selectedClusterId, selectedDatabase, 1);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedClusterId, selectedDatabase]);
+  }, [selectedDbId]);
   // ─────────────────────────────────────────────────────────────────────────
 
   // ── Load / save AI conversation from DB ──────────────────────────────────
@@ -1616,7 +1465,7 @@ export default function QueryEditorPage() {
       })
       .catch(() => setAiMessages([]));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedClusterId, selectedDatabase]);
+  }, [selectedDbId]);
 
   const handleAiConversationUpdate = useCallback((msgs: AIChatMessage[]) => {
     if (!selectedClusterId) return;
@@ -1629,25 +1478,24 @@ export default function QueryEditorPage() {
   }, [selectedClusterId, selectedDatabase]);
   // ─────────────────────────────────────────────────────────────────────────
 
-  const handleSelectCluster = (id: string) => {
-    setSelectedClusterId(id || null);
-    const c = clusters.find((c: ClusterListItem) => c.id === id);
-    setQuery(DEFAULT_QUERY[c?.db_type ?? "postgres"] ?? DEFAULT_QUERY.postgres);
+  const handleSelectDb = (id: string) => {
+    setSelectedDbId(id);
+    const db = (userDatabases as UserDatabase[]).find((d) => d.id === id);
+    setQuery(DEFAULT_QUERY[db?.db_type ?? "postgres"] ?? DEFAULT_QUERY.postgres);
     setResult(null);
-    setSelectedDatabase("");
     setLastRunQuery("");
     setRunCount(0);
   };
 
   const handleRun = useCallback((sqlOverride?: string) => {
     const sql = sqlOverride ?? query;
-    if (!selectedClusterId || !sql.trim()) return;
+    if (!selectedDbId || !sql.trim()) return;
     const runStartTime = Date.now();
     setLastRunQuery(sql);
     setRunCount((c) => c + 1);
 
-    execQuery(
-      { clusterId: selectedClusterId, query: sql, database: selectedDatabase || undefined },
+    execUserDbQuery(
+      { databaseId: selectedDbId, query: sql },
       {
         onSuccess: (data) => {
           void (Date.now() - runStartTime);
@@ -1673,7 +1521,7 @@ export default function QueryEditorPage() {
             return [...prev, {
               query: sql,
               database: selectedDatabase,
-              clusterName: selectedCluster?.name ?? "",
+              clusterName: selectedUserDb?.database_name ?? "",
               dbType: dbType,
               time: new Date(),
               result: data,
@@ -1695,7 +1543,7 @@ export default function QueryEditorPage() {
         },
       },
     );
-  }, [selectedClusterId, query, selectedDatabase, execQuery, isRecording, selectedCluster, dbType, queryClient, loadHistory]);
+  }, [selectedDbId, selectedClusterId, selectedDatabase, query, execUserDbQuery, isRecording, selectedUserDb, dbType, queryClient, loadHistory]);
 
   const handleCopy = useCallback(() => {
     if (!result) return;
@@ -1714,7 +1562,8 @@ export default function QueryEditorPage() {
   // ── Session recording ───────────────────────────────────────────────────
   const exportSessionPDF = useCallback(() => {
     if (sessionRecords.length === 0) return;
-    const cluster = selectedCluster;
+    const dbName = selectedUserDb?.database_name ?? "unknown";
+    const dbTypeLabel = (selectedUserDb?.db_type ?? "").toUpperCase();
     const now = new Date();
     const dateStr = now.toLocaleString();
 
@@ -1795,8 +1644,8 @@ export default function QueryEditorPage() {
     <h1>&#128190; PocketDB Session Report</h1>
     <div class="meta">
       <strong>Generated:</strong> ${dateStr} &nbsp;&middot;&nbsp;
-      <strong>Cluster:</strong> ${escHtml(cluster?.name ?? "unknown")} &nbsp;&middot;&nbsp;
-      <strong>Engine:</strong> ${escHtml((cluster?.db_type ?? "").toUpperCase())} ${escHtml(cluster?.db_version ?? "")} &nbsp;&middot;&nbsp;
+      <strong>Database:</strong> ${escHtml(dbName)} &nbsp;&middot;&nbsp;
+      <strong>Engine:</strong> ${escHtml(dbTypeLabel)} &nbsp;&middot;&nbsp;
       <strong>Queries:</strong> ${sessionRecords.length}
     </div>
   </div>
@@ -1810,57 +1659,36 @@ export default function QueryEditorPage() {
     if (!win) { toast.error("Popup blocked — allow popups for PDF export"); return; }
     win.document.write(html);
     win.document.close();
-  }, [sessionRecords, selectedCluster]);
+  }, [sessionRecords, selectedUserDb]);
 
   return (
     <>
     <div className="h-full flex flex-col overflow-hidden">
-      {!zenMode && <Topbar title="Query Editor" subtitle="Execute SQL or Redis commands on any running cluster" />}
+      {!zenMode && <Topbar title="Query Editor" subtitle="Execute SQL queries on your databases" />}
 
-      {/* ── Cluster toolbar ───────────────────────────────────────────────── */}
+      {/* ── Toolbar ──────────────────────────────────────────────────────── */}
       <div className="shrink-0 flex items-center gap-2.5 px-4 py-2.5 border-b border-surface-border bg-surface-50/70">
         <div className={cn("flex items-center justify-center w-7 h-7 rounded-md shrink-0", meta.bg)}>
           <FontAwesomeIcon icon={meta.icon} className={cn("text-xs", meta.color)} />
         </div>
 
-        <ClusterPicker
-          clusters={clusters}
-          value={selectedClusterId}
-          onChange={(id) => handleSelectCluster(id)}
+        <UserDatabasePicker
+          databases={userDatabases as UserDatabase[]}
+          value={selectedDbId}
+          onChange={(id) => handleSelectDb(id)}
         />
 
-        {selectedCluster && (
+        {selectedUserDb && (
           <span className={cn("hidden sm:inline-flex items-center gap-1.5 text-2xs font-semibold px-2 py-1 rounded-md", meta.bg, meta.color)}>
             <FontAwesomeIcon icon={meta.icon} className="text-xs" />
-            {meta.label} {selectedCluster.db_version}
+            {meta.label}
           </span>
         )}
 
-        {!isRedis && selectedClusterId && (
-          <DatabasePicker
-            databases={databases}
-            value={selectedDatabase}
-            loading={isPending}
-            onOpen={() => refetchDatabases()}
-            onChange={(db) => {
-              setSelectedDatabase(db);
-              if (db && query.trim()) {
-                execQuery(
-                  { clusterId: selectedClusterId, query, database: db },
-                  {
-                    onSuccess: (data) => {
-                      setResult(data);
-                    },
-                  },
-                );
-              }
-            }}
-          />
-        )}
-        {clusters.length === 0 && (
+        {(userDatabases as UserDatabase[]).length === 0 && (
           <span className="hidden sm:flex items-center gap-1.5 text-xs text-yellow-400">
             <FontAwesomeIcon icon={faCircleDot} className="animate-pulse text-xs" />
-            No running clusters
+            No databases yet
           </span>
         )}
 
@@ -1897,7 +1725,7 @@ export default function QueryEditorPage() {
           </button>
 
           {/* ERD button — only when a database is selected (non-Redis) */}
-          {!isRedis && selectedClusterId && selectedDatabase && (
+          {selectedDbId && selectedDatabase && (
             <button
               onClick={() => setShowERD(true)}
               className="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5 hover:border-brand-500/60 hover:text-brand-400"
@@ -2013,7 +1841,7 @@ export default function QueryEditorPage() {
       )}
 
       {/* ── Redis mode banner ─────────────────────────────────────────────── */}
-      {selectedCluster && isRedis && (
+      {false && (
         <div className="shrink-0 flex items-center gap-3 px-4 py-2 border-b border-red-500/20 bg-red-500/5">
           <FontAwesomeIcon icon={faTriangleExclamation} className="text-red-400 text-xs shrink-0" />
           <p className="text-xs text-fg-muted">
@@ -2144,18 +1972,16 @@ export default function QueryEditorPage() {
               {!result && !isPending && (
                 <div className="h-full flex flex-col items-center justify-center gap-3 text-center px-8">
                   <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center", meta.bg)}>
-                    <FontAwesomeIcon icon={selectedCluster ? meta.icon : faCode} className={cn("text-xl", meta.color)} />
+                    <FontAwesomeIcon icon={selectedUserDb ? meta.icon : faCode} className={cn("text-xl", meta.color)} />
                   </div>
                   <div>
                     <p className="text-sm font-medium text-fg-base">
-                      {selectedCluster ? `${meta.label} ready` : "Select a cluster to begin"}
+                      {selectedUserDb ? `${meta.label} ready` : "Select a database to begin"}
                     </p>
                     <p className="text-xs text-fg-subtle mt-1">
-                      {selectedCluster
-                        ? isRedis
-                          ? "Enter a Redis command above and press Run"
-                          : "Write your query above and press Ctrl + Enter"
-                        : "Choose a running cluster from the toolbar"}
+                      {selectedUserDb
+                        ? "Write your query above and press Ctrl + Enter"
+                        : "Choose a database from the toolbar"}
                     </p>
                   </div>
                 </div>
@@ -2374,9 +2200,9 @@ export default function QueryEditorPage() {
               <div className="flex-1 min-h-0 overflow-hidden">
                 <AIAssistPanel
                   dbType={dbType}
-                  dbVersion={selectedCluster?.db_version ?? ""}
+                  dbVersion={""}
                   clusterId={selectedClusterId}
-                  clusterName={selectedCluster?.name ?? ""}
+                  clusterName={selectedUserDb?.database_name ?? ""}
                   database={selectedDatabase}
                   messages={aiMessages}
                   setMessages={setAiMessages}
@@ -2419,24 +2245,18 @@ export default function QueryEditorPage() {
 
       {/* ── Status bar ────────────────────────────────────────────────────── */}
       <div className="shrink-0 h-6 flex items-center px-4 gap-4 border-t border-surface-border bg-surface-50">
-        {selectedCluster ? (
+        {selectedUserDb ? (
           <>
             <span className="flex items-center gap-1.5 text-2xs text-green-500">
               <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
-              {selectedCluster.name}
+              {selectedUserDb.database_name}
             </span>
             <span className={cn("text-2xs font-medium", meta.color)}>
-              {meta.label} {selectedCluster.db_version}
+              {meta.label}
             </span>
-            {!isRedis && selectedDatabase && (
-              <>
-                <span className="text-2xs text-fg-subtle">/</span>
-                <span className="text-2xs text-fg-base font-medium">{selectedDatabase}</span>
-              </>
-            )}
           </>
         ) : (
-          <span className="text-2xs text-fg-subtle">No cluster selected</span>
+          <span className="text-2xs text-fg-subtle">No database selected</span>
         )}
         {result && !result.error && (
           <span className="ml-auto flex items-center gap-3 text-2xs text-fg-subtle">

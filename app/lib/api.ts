@@ -376,6 +376,9 @@ export const databaseApi = {
     api.post("/databases", data).then((r) => r.data),
 
   delete: (id: string) => api.delete(`/databases/${id}`),
+
+  query: (id: string, query: string, nodeId?: string) =>
+    api.post(`/databases/${id}/query`, { query, node_id: nodeId }).then((r) => r.data),
 };
 
 

@@ -4,11 +4,13 @@ import {
   faDatabase, faServer, faCircleCheck, faCircleExclamation,
   faPlus, faLayerGroup, faArrowRight,
   faCheckCircle, faChartLine, faBolt, faCodeBranch,
+  faUser, faKey, faTable,
 } from "@fortawesome/free-solid-svg-icons";
-import { useClusters } from "@/hooks/useClusters";
+import { useClusters, useUserDatabases } from "@/hooks/useClusters";
 import Topbar from "@/components/layout/Topbar";
 import { useUIStore } from "@/store/ui";
-import type { ClusterListItem } from "@/types";
+import { useAuthStore } from "@/store/auth";
+import type { ClusterListItem, UserDatabase } from "@/types";
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -54,6 +56,16 @@ function Skeleton({ className }: { className?: string }) {
 }
 
 export default function OverviewPage() {
+  const user = useAuthStore((s) => s.user);
+  const isAdmin = user?.role === "admin";
+
+  return isAdmin ? <AdminOverview /> : <SubscriberOverview />;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ADMIN OVERVIEW — cluster management interface
+══════════════════════════════════════════════════════════════ */
+function AdminOverview() {
   const { data: clusters = [], isLoading } = useClusters();
   const { setCreateModalOpen } = useUIStore();
 
@@ -377,3 +389,228 @@ export default function OverviewPage() {
   );
 }
 
+/* ══════════════════════════════════════════════════════════════
+   SUBSCRIBER OVERVIEW — database-focused interface
+══════════════════════════════════════════════════════════════ */
+const DB_CONFIG_SUB: Record<string, { color: string; label: string; dot: string }> = {
+  postgres: { color: "bg-blue-500/10 text-blue-400 border-blue-500/20",     label: "PostgreSQL", dot: "bg-blue-400" },
+  mysql:    { color: "bg-orange-500/10 text-orange-400 border-orange-500/20", label: "MySQL",    dot: "bg-orange-400" },
+};
+
+function SubscriberOverview() {
+  const { data: databases = [], isLoading } = useUserDatabases();
+  const user = useAuthStore((s) => s.user);
+
+  const pgCount    = (databases as UserDatabase[]).filter((d) => d.db_type === "postgres").length;
+  const myCount    = (databases as UserDatabase[]).filter((d) => d.db_type === "mysql").length;
+  const totalCount = (databases as UserDatabase[]).length;
+
+  return (
+    <div className="min-h-full bg-[var(--bg)]">
+      <Topbar title="Overview" subtitle="PocketDB" />
+
+      <div className="p-4 md:p-6 space-y-5 max-w-[1400px] mx-auto">
+
+        {/* Hero */}
+        <div className="relative overflow-hidden rounded-2xl border border-brand-500/20 bg-surface-50 p-6 md:p-8">
+          <div className="absolute inset-0 bg-gradient-to-br from-brand-500/10 via-transparent to-transparent pointer-events-none" />
+          <div className="absolute inset-0 bg-hero-glow opacity-50 pointer-events-none" />
+          <div className="absolute inset-0 opacity-[0.035] pointer-events-none"
+            style={{ backgroundImage: "linear-gradient(var(--text-muted) 1px,transparent 1px),linear-gradient(90deg,var(--text-muted) 1px,transparent 1px)", backgroundSize: "32px 32px" }} />
+
+          <div className="relative flex flex-col sm:flex-row sm:items-center gap-6">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-brand-500 uppercase tracking-widest mb-2">
+                Your Workspace
+              </p>
+              <h2 className="text-2xl md:text-3xl font-bold text-fg-strong mb-2 leading-tight">
+                Manage your databases
+              </h2>
+              <p className="text-sm text-fg-muted mb-5 max-w-lg">
+                Provision PostgreSQL and MySQL databases instantly. Your connection credentials are generated and ready to use.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <Link href="/dashboard/databases" className="btn-primary">
+                  <FontAwesomeIcon icon={faPlus} />
+                  New Database
+                </Link>
+                <Link href="/dashboard/databases" className="btn-secondary">
+                  My Databases
+                  <FontAwesomeIcon icon={faArrowRight} className="text-xs" />
+                </Link>
+              </div>
+            </div>
+
+            <div className="hidden md:flex items-center gap-3 shrink-0">
+              {[faDatabase, faKey, faTable].map((icon, i) => (
+                <div key={i}
+                  className="w-14 h-14 rounded-2xl border border-brand-500/20 bg-brand-500/10 flex items-center justify-center"
+                  style={{ transform: `rotate(${[-6, 0, 6][i]}deg) translateY(${[4, 0, 4][i]}px)` }}
+                >
+                  <FontAwesomeIcon icon={icon} className="text-2xl text-brand-400/70" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Stat cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {[
+            { label: "Total Databases", value: totalCount, icon: faDatabase,     iconColor: "text-brand-500", iconBg: "bg-brand-500/12",  accent: "before:bg-brand-500"  },
+            { label: "PostgreSQL",      value: pgCount,    icon: faServer,       iconColor: "text-blue-400",  iconBg: "bg-blue-500/12",   accent: "before:bg-blue-400"   },
+            { label: "MySQL",           value: myCount,    icon: faLayerGroup,   iconColor: "text-orange-400",iconBg: "bg-orange-500/12", accent: "before:bg-orange-400" },
+          ].map((s) => (
+            <div key={s.label}
+              className={cn(
+                "relative bg-surface-50 rounded-2xl p-5 border border-surface-border flex flex-col gap-4",
+                "overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/10",
+                `before:absolute before:top-0 before:left-4 before:right-4 before:h-[2px] before:rounded-b-full ${s.accent}`
+              )}
+            >
+              <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center", s.iconBg)}>
+                <FontAwesomeIcon icon={s.icon} className={cn("text-base", s.iconColor)} />
+              </div>
+              <div>
+                {isLoading
+                  ? <Skeleton className="h-8 w-12 mb-1.5" />
+                  : <p className="text-3xl font-bold text-fg-strong leading-none tabular-nums">{s.value}</p>
+                }
+                <p className="text-xs text-fg-muted mt-1.5">{s.label}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Main content */}
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+
+          {/* Recent Databases */}
+          <div className="xl:col-span-2 bg-surface-50 rounded-2xl border border-surface-border overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-surface-border">
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-brand-500/12 flex items-center justify-center">
+                  <FontAwesomeIcon icon={faDatabase} className="text-xs text-brand-500" />
+                </div>
+                <h3 className="text-sm font-semibold text-fg-strong">Recent Databases</h3>
+              </div>
+              <Link href="/dashboard/databases" className="text-xs text-brand-500 hover:text-brand-400 font-medium flex items-center gap-1 transition-colors">
+                View all
+                <FontAwesomeIcon icon={faArrowRight} className="text-xs" />
+              </Link>
+            </div>
+
+            {isLoading ? (
+              <div className="p-4 space-y-3">
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} className="flex items-center gap-3 p-3 rounded-xl border border-surface-border">
+                    <Skeleton className="w-9 h-9 rounded-xl shrink-0" />
+                    <div className="flex-1 space-y-2">
+                      <Skeleton className="h-3 w-32" />
+                      <Skeleton className="h-2.5 w-20" />
+                    </div>
+                    <Skeleton className="h-5 w-24 rounded-full" />
+                    <Skeleton className="h-2.5 w-20 hidden sm:block" />
+                  </div>
+                ))}
+              </div>
+            ) : (databases as UserDatabase[]).length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-surface-100 flex items-center justify-center mb-4">
+                  <FontAwesomeIcon icon={faDatabase} className="text-2xl text-fg-subtle" />
+                </div>
+                <p className="text-sm font-medium text-fg-strong mb-1">No databases yet</p>
+                <p className="text-xs text-fg-muted mb-5 max-w-xs">
+                  Create your first database to get started.
+                </p>
+                <Link href="/dashboard/databases" className="btn-primary">
+                  <FontAwesomeIcon icon={faPlus} />
+                  Create your first database
+                </Link>
+              </div>
+            ) : (
+              <div className="divide-y divide-surface-border">
+                {(databases as UserDatabase[]).slice(0, 6).map((d) => {
+                  const cfg = DB_CONFIG_SUB[d.db_type] ?? DB_CONFIG_SUB.postgres;
+                  return (
+                    <Link key={d.id} href="/dashboard/databases"
+                      className="flex items-center gap-3 px-5 py-3.5 hover:bg-surface-100/60 transition-colors group"
+                    >
+                      <div className="w-9 h-9 rounded-xl bg-brand-500/10 border border-brand-500/15 flex items-center justify-center shrink-0">
+                        <FontAwesomeIcon icon={faDatabase} className="text-brand-500 text-xs" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-fg-strong truncate group-hover:text-brand-400 transition-colors">
+                          {d.database_name}
+                        </p>
+                        <p className="text-xs text-fg-subtle mt-0.5">{d.host}:{d.port}</p>
+                      </div>
+                      <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium border", cfg.color)}>
+                        <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", cfg.dot)} />
+                        {cfg.label}
+                      </span>
+                      <span className="hidden sm:block text-xs text-fg-subtle shrink-0 min-w-[90px] text-right">
+                        {formatDistanceToNow(new Date(d.created_at), { addSuffix: true })}
+                      </span>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Quick Actions */}
+          <div className="flex flex-col gap-5">
+            <div className="bg-surface-50 rounded-2xl border border-surface-border overflow-hidden">
+              <div className="px-5 py-4 border-b border-surface-border">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-brand-500/12 flex items-center justify-center">
+                    <FontAwesomeIcon icon={faBolt} className="text-xs text-brand-500" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-fg-strong">Quick Actions</h3>
+                </div>
+              </div>
+              <div className="p-3 space-y-1.5">
+                {[
+                  { icon: faPlus,      label: "New Database",  sub: "Provision a new database",  href: "/dashboard/databases"      },
+                  { icon: faDatabase,  label: "My Databases",  sub: "View all your databases",    href: "/dashboard/databases"      },
+                  { icon: faChartLine, label: "Query Editor",  sub: "Run SQL queries",            href: "/dashboard/query-editor"   },
+                  { icon: faUser,      label: "Settings",      sub: "Manage your account",        href: "/dashboard/settings"       },
+                ].map((a) => (
+                  <Link key={a.label} href={a.href}>
+                    <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-surface-100 transition-colors cursor-pointer group">
+                      <div className="w-8 h-8 rounded-lg bg-surface-100 group-hover:bg-brand-500/12 border border-surface-border flex items-center justify-center shrink-0 transition-colors">
+                        <FontAwesomeIcon icon={a.icon} className="text-xs text-fg-muted group-hover:text-brand-500 transition-colors" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium text-fg-strong">{a.label}</p>
+                        <p className="text-xs text-fg-subtle truncate">{a.sub}</p>
+                      </div>
+                      <FontAwesomeIcon icon={faArrowRight} className="ml-auto text-xs text-fg-subtle group-hover:text-brand-500 transition-colors shrink-0" />
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+
+            {/* Account info */}
+            <div className="bg-surface-50 rounded-2xl border border-surface-border p-5">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center shrink-0">
+                  <FontAwesomeIcon icon={faUser} className="text-brand-400" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-fg-strong truncate">{user?.email ?? "—"}</p>
+                  <p className="text-xs text-fg-subtle capitalize">{user?.role ?? "subscriber"}</p>
+                </div>
+              </div>
+              <div className="text-xs text-fg-subtle leading-relaxed">
+                You can create databases on managed clusters. Contact an admin to change your role or request infrastructure changes.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

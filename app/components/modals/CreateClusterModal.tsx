@@ -84,7 +84,7 @@ export default function CreateClusterModal() {
   const [form, setForm]               = useState(makeForm("postgres"));
   const [showPassword, setShowPassword] = useState(false);
 
-  const canCreate = user?.role === "subscriber" || user?.role === "admin";
+  const canCreate = user?.role === "admin";
 
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -120,10 +120,10 @@ export default function CreateClusterModal() {
             <FontAwesomeIcon icon={faLock} className="text-brand-400 text-2xl" />
           </div>
           <div>
-            <h2 className="text-base font-bold text-fg-strong">Subscriber Required</h2>
+            <h2 className="text-base font-bold text-fg-strong">Admin Required</h2>
             <p className="text-xs text-fg-subtle mt-1.5 leading-relaxed">
-              Creating clusters is available to <span className="text-brand-400 font-semibold">Subscriber</span> and <span className="text-brand-400 font-semibold">Admin</span> accounts.<br />
-              Ask an admin to upgrade your role.
+              Cluster creation is restricted to <span className="text-brand-400 font-semibold">Admin</span> accounts only.<br />
+              Contact a system administrator for access.
             </p>
           </div>
           <button

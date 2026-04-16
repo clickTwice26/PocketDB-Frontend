@@ -164,3 +164,18 @@ export function useDeleteDatabase() {
     onError: (err: Error) => toast.error(err.message),
   });
 }
+
+export function useExecuteUserDbQuery() {
+  return useMutation({
+    mutationFn: ({
+      databaseId,
+      query,
+      nodeId,
+    }: {
+      databaseId: string;
+      query: string;
+      nodeId?: string;
+    }) => databaseApi.query(databaseId, query, nodeId),
+    onError: (err: Error) => toast.error(err.message),
+  });
+}

@@ -7,7 +7,6 @@ import {
   faCircleExclamation, faPlugCircleCheck,
 } from "@fortawesome/free-solid-svg-icons";
 import { useUserDatabases, useDeleteDatabase } from "@/hooks/useClusters";
-import { useAuthStore } from "@/store/auth";
 import Topbar from "@/components/layout/Topbar";
 import CreateDatabaseModal from "@/components/modals/CreateDatabaseModal";
 import type { UserDatabase } from "@/types";
@@ -117,9 +116,6 @@ export default function DatabasesPage() {
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const { data: databases = [], isLoading, error } = useUserDatabases();
-  const user = useAuthStore((s) => s.user);
-
-  const isSubscriberOrAdmin = user?.role === "subscriber" || user?.role === "admin";
 
   const filtered = (databases as UserDatabase[]).filter((d) =>
     d.database_name.toLowerCase().includes(search.toLowerCase())
@@ -148,15 +144,13 @@ export default function DatabasesPage() {
             />
           </div>
 
-          {isSubscriberOrAdmin && (
-            <button
-              onClick={() => setModalOpen(true)}
-              className="btn-primary shrink-0"
-            >
-              <FontAwesomeIcon icon={faPlus} />
-              New Database
-            </button>
-          )}
+          <button
+            onClick={() => setModalOpen(true)}
+            className="btn-primary shrink-0"
+          >
+            <FontAwesomeIcon icon={faPlus} />
+            New Database
+          </button>
         </div>
 
         {/* Content */}
@@ -179,12 +173,10 @@ export default function DatabasesPage() {
                 {search ? "No databases match your search" : "No databases yet"}
               </p>
               <p className="text-sm text-slate-500">
-                {isSubscriberOrAdmin
-                  ? "Create your first database to get started."
-                  : "Contact your administrator to get a database."}
+                Create your first database to get started.
               </p>
             </div>
-            {isSubscriberOrAdmin && !search && (
+            {!search && (
               <button onClick={() => setModalOpen(true)} className="btn-primary">
                 <FontAwesomeIcon icon={faPlus} />
                 Create Database

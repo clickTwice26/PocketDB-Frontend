@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faPlus, faSearch, faFilter, faDatabase,
@@ -21,7 +22,14 @@ export default function ClustersPage() {
   const { data: clusters = [], isLoading, error } = useClusters();
   const { setCreateModalOpen } = useUIStore();
   const user = useAuthStore((s) => s.user);
+  const router = useRouter();
   const isAdmin = user?.role === "admin";
+
+  // Non-admins have no business here — redirect to databases
+  if (user && !isAdmin) {
+    router.replace("/dashboard/databases");
+    return null;
+  }
 
   const filtered = clusters.filter((c: ClusterListItem) => {
     const matchSearch =
@@ -76,7 +84,7 @@ export default function ClustersPage() {
             ))}
           </div>
 
-          <button onClick={() => setCreateModalOpen(true)} className="btn-primary shrink-0" style={isAdmin ? undefined : { display: "none" }}>
+          <button onClick={() => setCreateModalOpen(true)} className="btn-primary shrink-0">
             <FontAwesomeIcon icon={faPlus} />
             New Cluster
           </button>
