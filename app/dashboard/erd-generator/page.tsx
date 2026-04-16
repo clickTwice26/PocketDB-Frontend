@@ -38,16 +38,16 @@ import {
   faTrash,
   faPencil,
 } from "@fortawesome/free-solid-svg-icons";
-import { browserApi, clusterApi, aiApi, erdDiagramApi } from "@/lib/api";
+import { browserApi, aiApi, erdDiagramApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import Topbar from "@/components/layout/Topbar";
 import toast from "react-hot-toast";
+import { useUserDatabases } from "@/hooks/useClusters";
 import type {
   BrowserColumn,
   BrowserForeignKey,
   BrowserTable,
-  ClusterListItem,
-  BrowserDatabase,
+  UserDatabase,
   ERDDiagram,
 } from "@/types";
 
@@ -692,15 +692,16 @@ function generateERDSvg(
 
 // ─── Main Page Component ────────────────────────────────────────────────────────
 export default function ERDGeneratorPage() {
-  // ── Cluster / DB selection ───────────────────────────────────────────────────
-  const [clusters,          setClusters]          = useState<ClusterListItem[]>([]);
-  const [clustersLoading,   setClustersLoading]   = useState(true);
-  const [selectedClusterId, setSelectedClusterId] = useState<string>("");
-  const [databases,         setDatabases]         = useState<BrowserDatabase[]>([]);
-  const [dbLoading,         setDbLoading]         = useState(false);
-  const [selectedDatabase,  setSelectedDatabase]  = useState<string>("");
-  const [clusterDropOpen,   setClusterDropOpen]   = useState(false);
-  const [dbDropOpen,        setDbDropOpen]        = useState(false);
+  // ── User Database selection ──────────────────────────────────────────────────
+  const { data: rawUserDbs = [] } = useUserDatabases();
+  const userDatabases = rawUserDbs as UserDatabase[];
+  const [selectedDbId,     setSelectedDbId]     = useState<string>("");
+  const [dbDropOpen,       setDbDropOpen]       = useState(false);
+
+  // Derived from selected user database
+  const selectedUserDb    = userDatabases.find((d) => d.id === selectedDbId) ?? null;
+  const selectedClusterId = selectedUserDb?.cluster_id ?? "";
+  const selectedDatabase  = selectedUserDb?.database_name ?? "";
 
   // ── ERD data ─────────────────────────────────────────────────────────────────
   const [tables,    setTables]    = useState<TableSchema[]>([]);
@@ -749,37 +750,17 @@ export default function ERDGeneratorPage() {
   type PanState    = { startX: number; startY: number; origPX: number; origPY: number };
   const panDragRef = useRef<PanState | null>(null);
 
-  // ── Fetch clusters on mount ───────────────────────────────────────────────────
+  // ── Fetch saved diagrams on mount ────────────────────────────────────────────
   useEffect(() => {
-    clusterApi.list().then((data) => {
-      const list: ClusterListItem[] = Array.isArray(data) ? data : (data?.clusters ?? []);
-      setClusters(list);
-    }).catch(() => {}).finally(() => setClustersLoading(false));
-    // Load saved diagrams on mount
     erdDiagramApi.list().then((data: ERDDiagram[]) => setSavedDiagrams(data)).catch(() => {});
   }, []);
 
-  // ── Fetch databases when cluster selected ────────────────────────────────────
-  useEffect(() => {
-    if (!selectedClusterId) { setDatabases([]); setSelectedDatabase(""); return; }
-    setDbLoading(true);
-    setDatabases([]);
-    setSelectedDatabase("");
-    setTables([]);
-    setError(null);
-    browserApi.listDatabases(selectedClusterId)
-      .then((data) => {
-        const list: BrowserDatabase[] = Array.isArray(data) ? data : (data?.databases ?? []);
-        setDatabases(list);
-        if (list.length === 1) setSelectedDatabase(list[0].name);
-      })
-      .catch(() => {})
-      .finally(() => setDbLoading(false));
-  }, [selectedClusterId]);
-
   // ── Fetch schema when database selected ──────────────────────────────────────
   useEffect(() => {
-    if (!selectedClusterId || !selectedDatabase) return;
+    if (!selectedDbId) return;
+    const clusterId = selectedUserDb?.cluster_id ?? "";
+    const dbName    = selectedUserDb?.database_name ?? "";
+    if (!clusterId || !dbName) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -790,14 +771,13 @@ export default function ERDGeneratorPage() {
 
     (async () => {
       try {
-        const raw = await browserApi.listTables(selectedClusterId, selectedDatabase);
+        const raw = await browserApi.listTables(clusterId, dbName);
         const tableList: BrowserTable[] = Array.isArray(raw) ? raw : (raw?.tables ?? []);
         if (cancelled) return;
 
         const limited = tableList.slice(0, 80);
         setLoadMsg(`Loading structure for ${limited.length} tables…`);
 
-        const selectedCluster = clusters.find((c) => c.id === selectedClusterId);
         const pgSchema = "public";
         const schemas: TableSchema[] = [];
 
@@ -807,7 +787,7 @@ export default function ERDGeneratorPage() {
           const results = await Promise.all(
             batch.map(async (t) => {
               try {
-                const s = await browserApi.getStructure(selectedClusterId, selectedDatabase, t.name, pgSchema);
+                const s = await browserApi.getStructure(clusterId, dbName, t.name, pgSchema);
                 return {
                   name:         t.name,
                   schemaName:   t.schema ?? pgSchema,
@@ -837,7 +817,7 @@ export default function ERDGeneratorPage() {
 
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedClusterId, selectedDatabase]);
+  }, [selectedDbId]);
 
   // ── Derived: visible tables (filter applied) ──────────────────────────────────
   const visibleTables = useMemo(
@@ -1139,8 +1119,7 @@ export default function ERDGeneratorPage() {
     }
   }, [visibleTables, positions, showCardinality, selectedDatabase]);
 
-  // ── Derived: selected cluster label ───────────────────────────────────────────
-  const selectedCluster = clusters.find((c) => c.id === selectedClusterId);
+  // ── Derived ───────────────────────────────────────────────────────────────────
   const filteredTableList = tables.filter((t) =>
     filterSearch === "" || t.name.toLowerCase().includes(filterSearch.toLowerCase())
   );
@@ -1150,121 +1129,63 @@ export default function ERDGeneratorPage() {
     <div className="flex flex-col h-full overflow-hidden">
       <Topbar
         title="ER Diagram Generator"
-        subtitle={
-          selectedCluster && selectedDatabase
-            ? `${selectedCluster.name} / ${selectedDatabase}`
-            : undefined
-        }
+        subtitle={selectedUserDb ? selectedUserDb.database_name : undefined}
       />
 
       {/* ── Toolbar ─────────────────────────────────────────────────────────── */}
       <div className="shrink-0 flex items-center gap-2 px-4 py-2 border-b border-surface-border bg-surface flex-wrap">
 
-        {/* Cluster Picker */}
+        {/* My Database Picker */}
         <div className="relative">
           <button
-            onClick={() => { setClusterDropOpen((o) => !o); setDbDropOpen(false); }}
+            onClick={() => setDbDropOpen((o) => !o)}
             className={cn(
-              "flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm transition-colors min-w-[160px]",
-              clusterDropOpen
+              "flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm transition-colors min-w-[180px]",
+              dbDropOpen
                 ? "border-brand-500/60 bg-brand-500/8 text-fg-base"
                 : "border-surface-border bg-surface hover:bg-surface-100 text-fg-muted hover:text-fg-base"
             )}
           >
             <FontAwesomeIcon icon={faDatabase} className="text-brand-400 text-xs shrink-0" />
             <span className="flex-1 text-left truncate">
-              {clustersLoading
-                ? "Loading…"
-                : selectedCluster
-                  ? selectedCluster.name
-                  : "Select cluster"}
+              {selectedUserDb ? selectedUserDb.database_name : "Select database"}
             </span>
+            {selectedUserDb && (
+              <span className="text-2xs px-1.5 py-0.5 rounded-full font-medium bg-brand-500/15 text-brand-300 shrink-0">
+                {selectedUserDb.db_type}
+              </span>
+            )}
             <FontAwesomeIcon icon={faChevronDown} className="text-xs shrink-0 text-fg-subtle" />
           </button>
 
-          {clusterDropOpen && (
+          {dbDropOpen && (
             <div className="absolute z-50 top-full mt-1 left-0 w-64 rounded-xl border border-surface-border bg-surface shadow-xl shadow-black/30 overflow-hidden">
               <div className="p-1 max-h-64 overflow-y-auto">
-                {clusters.length === 0 ? (
-                  <p className="px-3 py-2 text-xs text-fg-subtle italic">No clusters available</p>
+                {userDatabases.length === 0 ? (
+                  <p className="px-3 py-2 text-xs text-fg-subtle italic">No databases found — create one first</p>
                 ) : (
-                  clusters.map((c) => (
+                  userDatabases.map((db) => (
                     <button
-                      key={c.id}
-                      onClick={() => { setSelectedClusterId(c.id); setClusterDropOpen(false); }}
+                      key={db.id}
+                      onClick={() => {
+                        setSelectedDbId(db.id);
+                        setDbDropOpen(false);
+                        setTables([]);
+                        setError(null);
+                      }}
                       className={cn(
                         "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors",
-                        selectedClusterId === c.id
+                        selectedDbId === db.id
                           ? "bg-brand-500/15 text-fg-base"
                           : "text-fg-muted hover:bg-surface-100 hover:text-fg-base"
                       )}
                     >
                       <FontAwesomeIcon icon={faDatabase} className="text-brand-400 text-xs shrink-0" />
-                      <span className="flex-1 text-left truncate">{c.name}</span>
-                      <span className={cn(
-                        "text-2xs px-1.5 py-0.5 rounded-full font-medium shrink-0",
-                        c.status === "running" ? "bg-green-500/15 text-green-400" : "bg-surface-200 text-fg-subtle"
-                      )}>
-                        {c.db_type}
+                      <span className="flex-1 text-left truncate font-mono text-xs">{db.database_name}</span>
+                      <span className="text-2xs px-1.5 py-0.5 rounded-full font-medium bg-surface-200 text-fg-subtle shrink-0">
+                        {db.db_type}
                       </span>
-                      {selectedClusterId === c.id && (
-                        <FontAwesomeIcon icon={faCheck} className="text-brand-400 text-xs shrink-0" />
-                      )}
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Database Picker */}
-        <div className="relative">
-          <button
-            disabled={!selectedClusterId || dbLoading}
-            onClick={() => { setDbDropOpen((o) => !o); setClusterDropOpen(false); }}
-            className={cn(
-              "flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm transition-colors min-w-[140px]",
-              !selectedClusterId || dbLoading
-                ? "opacity-40 cursor-not-allowed border-surface-border bg-surface text-fg-subtle"
-                : dbDropOpen
-                  ? "border-brand-500/60 bg-brand-500/8 text-fg-base"
-                  : "border-surface-border bg-surface hover:bg-surface-100 text-fg-muted hover:text-fg-base"
-            )}
-          >
-            {dbLoading
-              ? <FontAwesomeIcon icon={faSpinner} className="text-xs animate-spin text-brand-400" />
-              : <FontAwesomeIcon icon={faSitemap}  className="text-brand-400 text-xs shrink-0" />
-            }
-            <span className="flex-1 text-left truncate">
-              {dbLoading ? "Loading…" : selectedDatabase || "Select database"}
-            </span>
-            <FontAwesomeIcon icon={faChevronDown} className="text-xs shrink-0 text-fg-subtle" />
-          </button>
-
-          {dbDropOpen && (
-            <div className="absolute z-50 top-full mt-1 left-0 w-52 rounded-xl border border-surface-border bg-surface shadow-xl shadow-black/30 overflow-hidden">
-              <div className="p-1 max-h-60 overflow-y-auto">
-                {databases.length === 0 ? (
-                  <p className="px-3 py-2 text-xs text-fg-subtle italic">No databases found</p>
-                ) : (
-                  databases.map((db) => (
-                    <button
-                      key={db.name}
-                      onClick={() => { setSelectedDatabase(db.name); setDbDropOpen(false); }}
-                      className={cn(
-                        "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors",
-                        selectedDatabase === db.name
-                          ? "bg-brand-500/15 text-fg-base"
-                          : "text-fg-muted hover:bg-surface-100 hover:text-fg-base"
-                      )}
-                    >
-                      <FontAwesomeIcon icon={faSitemap} className="text-brand-400 text-xs shrink-0" />
-                      <span className="flex-1 text-left truncate font-mono text-xs">{db.name}</span>
-                      {db.size && (
-                        <span className="text-2xs text-fg-subtle shrink-0">{db.size}</span>
-                      )}
-                      {selectedDatabase === db.name && (
+                      {selectedDbId === db.id && (
                         <FontAwesomeIcon icon={faCheck} className="text-brand-400 text-xs shrink-0" />
                       )}
                     </button>
@@ -1538,7 +1459,7 @@ export default function ERDGeneratorPage() {
         <div className="flex-1 overflow-hidden relative select-none">
 
           {/* Empty state – no tables loaded */}
-          {!selectedClusterId && tables.length === 0 && (
+          {!selectedDbId && tables.length === 0 && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 text-center px-8">
               <div className="w-20 h-20 rounded-2xl bg-brand-500/8 border border-brand-500/15 flex items-center justify-center">
                 <FontAwesomeIcon icon={faShareNodes} className="text-brand-400 text-3xl" />
@@ -1546,7 +1467,7 @@ export default function ERDGeneratorPage() {
               <div>
                 <h2 className="text-lg font-bold text-fg-base mb-2">ER Diagram Generator</h2>
                 <p className="text-sm text-fg-subtle max-w-sm">
-                  Select a cluster and database above to automatically generate an interactive
+                  Select a database above to automatically generate an interactive
                   Entity-Relationship diagram from your schema.
                 </p>
               </div>
@@ -1960,12 +1881,10 @@ export default function ERDGeneratorPage() {
 
       {/* ── Status bar ──────────────────────────────────────────────────────── */}
       <div className="shrink-0 h-6 flex items-center px-4 gap-3 border-t border-surface-border bg-surface text-2xs text-fg-subtle select-none">
-        {selectedCluster && (
+        {selectedUserDb && (
           <>
             <FontAwesomeIcon icon={faDatabase} className="text-brand-400" style={{ fontSize: 9 }} />
-            <span className="text-fg-base font-medium">{selectedCluster.name}</span>
-            <span className="text-fg-subtle/50">·</span>
-            <span className="font-mono">{selectedDatabase || "—"}</span>
+            <span className="text-fg-base font-medium">{selectedUserDb.database_name}</span>
             <span className="text-fg-subtle/50">·</span>
           </>
         )}
