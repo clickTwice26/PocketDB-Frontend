@@ -143,28 +143,6 @@ export interface BrowserData {
   error?: string;
 }
 
-// ─── EXPLAIN / Query Plan ─────────────────────────────────────────────────────
-
-export interface ExplainResult {
-  plan_json: unknown;
-  plan_text: string;
-  engine: string;
-  error?: string;
-}
-
-// ─── Index Management ─────────────────────────────────────────────────────────
-
-export interface IndexInfo {
-  index_name: string;
-  table_name: string;
-  definition?: string;
-  is_primary: boolean;
-  is_unique: boolean;
-  size?: string;
-  index_type: string;
-  columns: string[];
-}
-
 // ─── Backup & Restore ─────────────────────────────────────────────────────────
 
 export interface BackupResult {
@@ -182,26 +160,18 @@ export interface RestoreResult {
   error?: string;
 }
 
-// ─── Transaction Demo ─────────────────────────────────────────────────────────
+// ─── ERD Diagrams ───────────────────────────────────────────────────────────
 
-export interface IsolationLevel {
+export interface ERDDiagram {
+  id: string;
+  user_id: string;
   name: string;
-  description: string;
+  cluster_id: string | null;
+  database_name: string | null;
+  tables_json: unknown[];
+  positions_json: Record<string, { x: number; y: number }>;
+  created_at: string;
+  updated_at: string;
 }
 
-export interface TransactionStepResult {
-  session: string;
-  sql: string;
-  columns: string[];
-  rows: unknown[][];
-  row_count: number;
-  execution_time_ms: number;
-  error?: string;
-}
 
-export interface TransactionDemoResult {
-  results: TransactionStepResult[];
-  isolation_level: string;
-  engine: string;
-  error?: string;
-}

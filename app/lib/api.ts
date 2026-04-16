@@ -292,35 +292,6 @@ export const adminApi = {
     api.patch<AuthUser>(`/admin/users/${userId}/role`, { role }).then((r) => r.data),
 };
 
-// ─── EXPLAIN / Query Plan API ────────────────────────────────────────────────
-
-export const explainApi = {
-  explain: (clusterId: string, query: string, analyze = false, database?: string) =>
-    api.post(`/clusters/${clusterId}/explain`, { query, analyze, database }).then((r) => r.data),
-};
-
-// ─── Index Management API ────────────────────────────────────────────────────
-
-export const indexApi = {
-  list: (clusterId: string, database: string, table?: string, schema = "public") =>
-    api.get(`/clusters/${clusterId}/indexes`, {
-      params: { database, table: table || undefined, schema },
-    }).then((r) => r.data),
-
-  create: (
-    clusterId: string,
-    data: {
-      database: string; table: string; index_name: string;
-      columns: string[]; index_type?: string; unique?: boolean; schema?: string;
-    }
-  ) => api.post(`/clusters/${clusterId}/indexes`, data).then((r) => r.data),
-
-  drop: (
-    clusterId: string,
-    data: { database: string; index_name: string; table?: string; schema?: string }
-  ) => api.delete(`/clusters/${clusterId}/indexes`, { data }).then((r) => r.data),
-};
-
 // ─── Backup & Restore API ────────────────────────────────────────────────────
 
 export const backupApi = {
@@ -331,19 +302,29 @@ export const backupApi = {
     api.post(`/clusters/${clusterId}/restore`, { database, sql_dump }, { timeout: 120000 }).then((r) => r.data),
 };
 
-// ─── Transaction Demo API ────────────────────────────────────────────────────
+// ─── ERD Diagrams API ────────────────────────────────────────────────────
 
-export const transactionApi = {
-  isolationLevels: (clusterId: string) =>
-    api.get(`/clusters/${clusterId}/isolation-levels`).then((r) => r.data),
+export const erdDiagramApi = {
+  list: () =>
+    api.get("/erd-diagrams").then((r) => r.data),
 
-  runDemo: (
-    clusterId: string,
-    data: {
-      database: string;
-      isolation_level: string;
-      steps: { session: string; sql: string }[];
-    }
-  ) => api.post(`/clusters/${clusterId}/transaction-demo`, data, { timeout: 60000 }).then((r) => r.data),
+  create: (data: {
+    name: string;
+    cluster_id?: string | null;
+    database_name?: string | null;
+    tables_json: unknown[];
+    positions_json: Record<string, { x: number; y: number }>;
+  }) => api.post("/erd-diagrams", data).then((r) => r.data),
+
+  update: (id: string, data: {
+    name?: string;
+    tables_json?: unknown[];
+    positions_json?: Record<string, { x: number; y: number }>;
+  }) => api.put(`/erd-diagrams/${id}`, data).then((r) => r.data),
+
+  delete: (id: string) =>
+    api.delete(`/erd-diagrams/${id}`),
 };
+
+
 

@@ -33,8 +33,12 @@ import {
   faRobot,
   faArrowRotateLeft,
   faArrowRotateRight,
+  faFloppyDisk,
+  faFolderOpen,
+  faTrash,
+  faPencil,
 } from "@fortawesome/free-solid-svg-icons";
-import { browserApi, clusterApi, aiApi } from "@/lib/api";
+import { browserApi, clusterApi, aiApi, erdDiagramApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import Topbar from "@/components/layout/Topbar";
 import toast from "react-hot-toast";
@@ -44,6 +48,7 @@ import type {
   BrowserTable,
   ClusterListItem,
   BrowserDatabase,
+  ERDDiagram,
 } from "@/types";
 
 // ─── Layout constants ──────────────────────────────────────────────────────────
@@ -725,6 +730,14 @@ export default function ERDGeneratorPage() {
   const [filterSearch,     setFilterSearch]     = useState("");
   const [exportLoading,    setExportLoading]    = useState(false);
 
+  // ── Saved diagrams state ───────────────────────────────────────────────────
+  const [savedDiagrams,      setSavedDiagrams]      = useState<ERDDiagram[]>([]);
+  const [savedDropOpen,      setSavedDropOpen]       = useState(false);
+  const [saveModalOpen,      setSaveModalOpen]       = useState(false);
+  const [saveName,           setSaveName]            = useState("");
+  const [savingDiagram,      setSavingDiagram]       = useState(false);
+  const [activeDiagramId,    setActiveDiagramId]     = useState<string | null>(null);
+
   // ── Refs ─────────────────────────────────────────────────────────────────────
   const zoomRef = useRef(zoom);
   const panRef  = useRef(pan);
@@ -742,6 +755,8 @@ export default function ERDGeneratorPage() {
       const list: ClusterListItem[] = Array.isArray(data) ? data : (data?.clusters ?? []);
       setClusters(list);
     }).catch(() => {}).finally(() => setClustersLoading(false));
+    // Load saved diagrams on mount
+    erdDiagramApi.list().then((data: ERDDiagram[]) => setSavedDiagrams(data)).catch(() => {});
   }, []);
 
   // ── Fetch databases when cluster selected ────────────────────────────────────
@@ -962,6 +977,73 @@ export default function ERDGeneratorPage() {
     setPan(p);  panRef.current  = p;
     if (tables.length > 0) setPositions(autoLayout(tables));
   }, [tables]);
+
+  // ── Save diagram ──────────────────────────────────────────────────────────────
+  const handleSaveDiagram = useCallback(async () => {
+    if (tables.length === 0 || !saveName.trim()) return;
+    setSavingDiagram(true);
+    try {
+      if (activeDiagramId) {
+        const updated: ERDDiagram = await erdDiagramApi.update(activeDiagramId, {
+          name: saveName.trim(),
+          tables_json: tables,
+          positions_json: positions,
+        });
+        setSavedDiagrams((prev) => prev.map((d) => d.id === updated.id ? updated : d));
+        toast.success("Diagram updated");
+      } else {
+        const created: ERDDiagram = await erdDiagramApi.create({
+          name: saveName.trim(),
+          cluster_id: selectedClusterId || null,
+          database_name: selectedDatabase || null,
+          tables_json: tables,
+          positions_json: positions,
+        });
+        setSavedDiagrams((prev) => [created, ...prev]);
+        setActiveDiagramId(created.id);
+        toast.success("Diagram saved");
+      }
+      setSaveModalOpen(false);
+    } catch {
+      toast.error("Failed to save diagram");
+    } finally {
+      setSavingDiagram(false);
+    }
+  }, [tables, positions, saveName, activeDiagramId, selectedClusterId, selectedDatabase]);
+
+  // ── Load diagram ──────────────────────────────────────────────────────────────
+  const handleLoadDiagram = useCallback((diagram: ERDDiagram) => {
+    const loadedTables = diagram.tables_json as TableSchema[];
+    const loadedPositions = diagram.positions_json as Record<string, Pos>;
+    pushHistory(loadedTables, loadedPositions);
+    setTables(loadedTables);
+    setPositions(loadedPositions);
+    setHiddenTables(new Set());
+    setActiveDiagramId(diagram.id);
+    setSaveName(diagram.name);
+    setSavedDropOpen(false);
+    const z = 0.78;
+    const p = { x: 32, y: 32 };
+    setZoom(z); zoomRef.current = z;
+    setPan(p);  panRef.current  = p;
+    toast.success(`Loaded "${diagram.name}"`);
+  }, [pushHistory]);
+
+  // ── Delete saved diagram ──────────────────────────────────────────────────────
+  const handleDeleteDiagram = useCallback(async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await erdDiagramApi.delete(id);
+      setSavedDiagrams((prev) => prev.filter((d) => d.id !== id));
+      if (activeDiagramId === id) {
+        setActiveDiagramId(null);
+        setSaveName("");
+      }
+      toast.success("Diagram deleted");
+    } catch {
+      toast.error("Failed to delete diagram");
+    }
+  }, [activeDiagramId]);
 
   // ── Toggle table visibility ───────────────────────────────────────────────────
   const toggleTable = useCallback((name: string) => {
@@ -1300,6 +1382,93 @@ export default function ERDGeneratorPage() {
 
         {/* Spacer */}
         <div className="flex-1" />
+
+        {/* Saved Diagrams dropdown */}
+        <div className="relative">
+          <button
+            onClick={() => { setSavedDropOpen((o) => !o); }}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors",
+              savedDropOpen
+                ? "border-brand-500/50 bg-brand-500/10 text-brand-300"
+                : "border-surface-border bg-surface text-fg-muted hover:text-fg-base hover:bg-surface-100"
+            )}
+            title="Load a saved diagram"
+          >
+            <FontAwesomeIcon icon={faFolderOpen} className="text-xs" />
+            Saved
+            {savedDiagrams.length > 0 && (
+              <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-2xs bg-surface-200 text-fg-subtle font-semibold">
+                {savedDiagrams.length}
+              </span>
+            )}
+            <FontAwesomeIcon icon={faChevronDown} className="text-xs text-fg-subtle" />
+          </button>
+
+          {savedDropOpen && (
+            <div className="absolute z-50 top-full mt-1 right-0 w-72 rounded-xl border border-surface-border bg-surface shadow-xl shadow-black/30 overflow-hidden">
+              <div className="p-2 border-b border-surface-border">
+                <p className="text-xs font-medium text-fg-subtle px-1">Saved Diagrams</p>
+              </div>
+              <div className="p-1 max-h-64 overflow-y-auto">
+                {savedDiagrams.length === 0 ? (
+                  <p className="px-3 py-3 text-xs text-fg-subtle italic text-center">No saved diagrams yet</p>
+                ) : (
+                  savedDiagrams.map((d) => (
+                    <div
+                      key={d.id}
+                      onClick={() => handleLoadDiagram(d)}
+                      className={cn(
+                        "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer group",
+                        activeDiagramId === d.id
+                          ? "bg-brand-500/15 text-fg-base"
+                          : "text-fg-muted hover:bg-surface-100 hover:text-fg-base"
+                      )}
+                    >
+                      <FontAwesomeIcon icon={faFloppyDisk} className="text-brand-400 text-xs shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium truncate">{d.name}</p>
+                        {d.database_name && (
+                          <p className="text-2xs text-fg-subtle truncate">{d.database_name}</p>
+                        )}
+                      </div>
+                      {activeDiagramId === d.id && (
+                        <FontAwesomeIcon icon={faCheck} className="text-brand-400 text-xs shrink-0" />
+                      )}
+                      <button
+                        onClick={(e) => handleDeleteDiagram(d.id, e)}
+                        className="opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center rounded text-fg-subtle hover:text-red-400 hover:bg-red-500/10 transition-all shrink-0"
+                        title="Delete diagram"
+                      >
+                        <FontAwesomeIcon icon={faTrash} className="text-xs" />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Save button */}
+        <button
+          onClick={() => {
+            if (tables.length === 0) { toast.error("Nothing to save — add tables first"); return; }
+            setSaveName(activeDiagramId ? (savedDiagrams.find((d) => d.id === activeDiagramId)?.name ?? "") : (selectedDatabase ? `${selectedDatabase} diagram` : "My Diagram"));
+            setSaveModalOpen(true);
+          }}
+          disabled={tables.length === 0}
+          className={cn(
+            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors",
+            tables.length === 0
+              ? "opacity-40 cursor-not-allowed border-surface-border bg-surface text-fg-subtle"
+              : "border-brand-500/40 bg-brand-500/8 text-brand-300 hover:bg-brand-500/15 hover:border-brand-500/60"
+          )}
+          title={activeDiagramId ? "Update saved diagram" : "Save diagram"}
+        >
+          <FontAwesomeIcon icon={faFloppyDisk} className="text-xs" />
+          {activeDiagramId ? "Update" : "Save"}
+        </button>
 
         {/* AI Design button */}
         <button
@@ -1828,7 +1997,78 @@ export default function ERDGeneratorPage() {
             {hoveredFK.replace(/__/g, " → ").split(" → ").slice(0, 2).join(".")}
           </span>
         )}
+        {activeDiagramId && (
+          <span className="ml-auto flex items-center gap-1 text-brand-400">
+            <FontAwesomeIcon icon={faFloppyDisk} style={{ fontSize: 9 }} />
+            {savedDiagrams.find((d) => d.id === activeDiagramId)?.name}
+          </span>
+        )}
       </div>
+
+      {/* ── Save Diagram Modal ─────────────────────────────────────────────────── */}
+      {saveModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget) setSaveModalOpen(false); }}
+        >
+          <div className="w-full max-w-sm mx-4 rounded-2xl border border-surface-border bg-surface shadow-2xl shadow-black/50 p-6">
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-9 h-9 rounded-xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-center shrink-0">
+                <FontAwesomeIcon icon={faFloppyDisk} className="text-brand-400 text-sm" />
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-fg-base">
+                  {activeDiagramId ? "Update Diagram" : "Save Diagram"}
+                </h2>
+                <p className="text-xs text-fg-subtle mt-0.5">
+                  {tables.length} table{tables.length !== 1 ? "s" : ""} will be saved
+                </p>
+              </div>
+              <button
+                onClick={() => setSaveModalOpen(false)}
+                className="ml-auto w-7 h-7 flex items-center justify-center rounded-lg text-fg-subtle hover:text-fg-base hover:bg-surface-100 transition-colors"
+              >
+                <FontAwesomeIcon icon={faXmark} className="text-xs" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-fg-muted mb-1.5">Diagram name</label>
+                <input
+                  type="text"
+                  value={saveName}
+                  onChange={(e) => setSaveName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleSaveDiagram(); }}
+                  placeholder="e.g. E-commerce schema"
+                  autoFocus
+                  className="w-full px-3 py-2 rounded-lg border border-surface-border bg-surface-100 text-sm text-fg-base placeholder:text-fg-subtle outline-none focus:border-brand-500/60 focus:ring-1 focus:ring-brand-500/20 transition-colors"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => setSaveModalOpen(false)}
+                  className="flex-1 px-3 py-2 rounded-lg border border-surface-border bg-surface text-xs font-medium text-fg-muted hover:bg-surface-100 hover:text-fg-base transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveDiagram}
+                  disabled={!saveName.trim() || savingDiagram}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold transition-colors"
+                >
+                  {savingDiagram
+                    ? <FontAwesomeIcon icon={faSpinner} className="text-xs animate-spin" />
+                    : <FontAwesomeIcon icon={faFloppyDisk} className="text-xs" />
+                  }
+                  {activeDiagramId ? "Update" : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
