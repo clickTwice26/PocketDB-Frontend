@@ -151,7 +151,7 @@ function parseDDLToSchemas(raw: string): TableSchema[] {
 
   // Match each CREATE TABLE block
   const tableRegex =
-    /CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+(?:"?[\w]+"?\.)?"?(\w+)"?\s*\(([^;]+)\)/gis;
+    /CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+(?:"?[\w]+"?\.)?"?(\w+)"?\s*\(([^;]+)\)/gi;
 
   let m: RegExpExecArray | null;
   while ((m = tableRegex.exec(ddl)) !== null) {
@@ -226,6 +226,8 @@ function parseDDLToSchemas(raw: string): TableSchema[] {
         is_nullable: isNullable,
         column_default: null,
         character_maximum_length: null,
+        ordinal_position: columns.length + 1,
+        is_primary_key: primary_keys.includes(colName),
       });
     }
 
