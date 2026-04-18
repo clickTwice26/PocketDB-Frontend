@@ -15,6 +15,7 @@ import {
   faShareNodes,
   faUserShield,
   faServer,
+  faSitemap,
 } from "@fortawesome/free-solid-svg-icons";
 import { useUIStore } from "@/store/ui";
 import { useAuthStore } from "@/store/auth";
@@ -206,7 +207,17 @@ function SidebarContent({
             href="/dashboard/admin"
             icon={faUserShield}
             label="User Management"
-            active={pathname.startsWith("/dashboard/admin")}
+            active={pathname === "/dashboard/admin"}
+            collapsed={collapsed}
+            onClick={onNavClick}
+          />
+        )}
+        {user?.role === "admin" && (
+          <NavItem
+            href="/dashboard/admin/system-erd"
+            icon={faSitemap}
+            label="System ERD"
+            active={pathname.startsWith("/dashboard/admin/system-erd")}
             collapsed={collapsed}
             onClick={onNavClick}
           />

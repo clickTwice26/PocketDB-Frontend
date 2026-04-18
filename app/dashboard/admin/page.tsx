@@ -1,10 +1,11 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faUserShield, faSpinner, faSearch, faCheck, faTriangleExclamation,
-  faUser, faCrown, faShieldHalved,
+  faUser, faCrown, faShieldHalved, faSitemap,
 } from "@fortawesome/free-solid-svg-icons";
 import { adminApi, type AuthUser } from "@/lib/api";
 import { useAuthStore } from "@/store/auth";
@@ -83,6 +84,21 @@ export default function AdminUsersPage() {
             );
           })}
         </div>
+
+        {/* System ERD card */}
+        <Link
+          href="/dashboard/admin/system-erd"
+          className="flex items-center gap-4 rounded-xl border border-brand-500/25 bg-brand-500/5 hover:bg-brand-500/10 hover:border-brand-500/40 transition-all p-4 mb-6 group"
+        >
+          <div className="w-11 h-11 rounded-xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-center shrink-0 group-hover:bg-brand-500/20 transition-colors">
+            <FontAwesomeIcon icon={faSitemap} className="text-brand-400 text-lg" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-fg-base group-hover:text-fg-strong transition-colors">System Database ERD</p>
+            <p className="text-xs text-fg-subtle mt-0.5">Live entity-relationship diagram of the PocketDB application schema — all tables, columns and FK relationships.</p>
+          </div>
+          <span className="text-xs text-brand-400 shrink-0 font-medium">View →</span>
+        </Link>
 
         {/* Search */}
         <div className="relative mb-4">

@@ -45,6 +45,34 @@ export interface TokenOut {
   user: AuthUser;
 }
 
+// ─── System ERD types ─────────────────────────────────────────────────────────
+
+export interface SystemErdColumn {
+  name: string;
+  data_type: string;
+  udt_name: string;
+  is_nullable: string;
+  column_default: string | null;
+  character_maximum_length: number | null;
+  ordinal_position: number;
+  is_primary_key: boolean;
+}
+
+export interface SystemErdFK {
+  constraint_name: string;
+  column_name: string;
+  foreign_table: string;
+  foreign_column: string;
+}
+
+export interface SystemErdTable {
+  name: string;
+  schemaName: string;
+  columns: SystemErdColumn[];
+  primary_keys: string[];
+  foreign_keys: SystemErdFK[];
+}
+
 export const authApi = {
   register: (name: string, email: string, password: string) =>
     api.post<TokenOut>("/auth/register", { name, email, password }).then((r) => r.data),
@@ -290,6 +318,7 @@ export const adminApi = {
   listUsers: () => api.get<AuthUser[]>("/admin/users").then((r) => r.data),
   updateRole: (userId: string, role: "normal" | "subscriber" | "admin") =>
     api.patch<AuthUser>(`/admin/users/${userId}/role`, { role }).then((r) => r.data),
+  systemErd: () => api.get<{ tables: SystemErdTable[] }>("/admin/system-erd").then((r) => r.data),
 };
 
 // ─── Backup & Restore API ────────────────────────────────────────────────────
