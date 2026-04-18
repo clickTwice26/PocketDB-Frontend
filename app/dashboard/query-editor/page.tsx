@@ -1713,19 +1713,6 @@ export default function QueryEditorPage() {
             )}
           </button>
 
-          {/* Browser button */}
-          <button
-            onClick={() => setActiveTab(activeTab === "browse" ? "output" : "browse")}
-            className={cn(
-              "btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5",
-              activeTab === "browse" && "bg-brand-500/10 border-brand-500/40 text-brand-400",
-            )}
-            title="Schema Browser"
-          >
-            <FontAwesomeIcon icon={faDatabase} className="text-xs" />
-            <span className="hidden sm:inline">Browse</span>
-          </button>
-
           {/* ERD button — only when a database is selected (non-Redis) */}
           {selectedDbId && selectedDatabase && (
             <button
@@ -1749,24 +1736,6 @@ export default function QueryEditorPage() {
           >
             <FontAwesomeIcon icon={faRobot} className="text-xs" />
             <span className="hidden sm:inline">AI</span>
-          </button>
-
-          {/* Interactive Mode button */}
-          <button
-            onClick={() => setActiveTab(activeTab === "interactive" ? "output" : "interactive")}
-            className={cn(
-              "btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5",
-              activeTab === "interactive" && "bg-brand-500/10 border-brand-500/40 text-brand-400",
-            )}
-            title="Interactive Mode — live visual output"
-          >
-            <FontAwesomeIcon icon={faChartLine} className="text-xs" />
-            <span className="hidden sm:inline">Live</span>
-            {runCount > 0 && (
-              <span className="text-2xs bg-brand-500/20 text-brand-400 px-1.5 rounded-full leading-none tabular-nums">
-                {runCount}
-              </span>
-            )}
           </button>
 
           {/* Record / Stop+Export buttons */}
@@ -1937,55 +1906,69 @@ export default function QueryEditorPage() {
           <div className="flex-1 flex flex-col overflow-hidden min-h-0">
 
             {/* Tab bar */}
-            <div className="shrink-0 flex items-center gap-1 px-3 py-2 border-b border-surface-border bg-surface-50">
-              {/* Tab: Output */}
-              <button
-                onClick={() => setActiveTab("output")}
-                className={cn(
-                  "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md font-medium transition-colors",
-                  activeTab === "output"
-                    ? "bg-brand-500/10 text-brand-400 border border-brand-500/30"
-                    : "text-fg-subtle hover:text-fg-base hover:bg-surface-100",
-                )}
-              >
-                Output
-                {isPending && <FontAwesomeIcon icon={faSpinner} className="animate-spin text-xs" />}
-                {result && !result.error && !isPending && (
-                  <span className="text-2xs text-green-400">{result.row_count} row{result.row_count !== 1 ? "s" : ""}</span>
-                )}
-                {result?.error && !isPending && <span className="text-2xs text-red-400">error</span>}
-              </button>
+            <div className="shrink-0 flex items-center gap-3 px-4 py-2.5 border-b border-surface-border bg-surface-50">
+              {/* Segmented pill control */}
+              <div className="flex items-center gap-0.5 bg-surface-100 border border-surface-border rounded-xl p-0.5">
 
-              {/* Tab: Browse */}
-              <button
-                onClick={() => setActiveTab("browse")}
-                className={cn(
-                  "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md font-medium transition-colors",
-                  activeTab === "browse"
-                    ? "bg-brand-500/10 text-brand-400 border border-brand-500/30"
-                    : "text-fg-subtle hover:text-fg-base hover:bg-surface-100",
-                )}
-              >
-                <FontAwesomeIcon icon={faDatabase} className="text-xs" />
-                Browse
-              </button>
+                {/* Tab: Output */}
+                <button
+                  onClick={() => setActiveTab("output")}
+                  className={cn(
+                    "relative flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-[10px] font-medium transition-all duration-150 select-none",
+                    activeTab === "output"
+                      ? "bg-surface-50 text-fg-strong shadow-sm border border-surface-border"
+                      : "text-fg-subtle hover:text-fg-base",
+                  )}
+                >
+                  <FontAwesomeIcon icon={faTableCells} className="text-[10px]" />
+                  Output
+                  {isPending && (
+                    <FontAwesomeIcon icon={faSpinner} className="animate-spin text-[10px] text-brand-400" />
+                  )}
+                  {result && !result.error && !isPending && (
+                    <span className="bg-green-500/15 text-green-500 text-[10px] font-semibold px-1.5 py-0.5 rounded-full leading-none tabular-nums">
+                      {result.row_count}
+                    </span>
+                  )}
+                  {result?.error && !isPending && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                  )}
+                </button>
 
-              {/* Tab: Interactive Mode */}
-              <button
-                onClick={() => setActiveTab("interactive")}
-                className={cn(
-                  "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md font-medium transition-colors",
-                  activeTab === "interactive"
-                    ? "bg-brand-500/10 text-brand-400 border border-brand-500/30"
-                    : "text-fg-subtle hover:text-fg-base hover:bg-surface-100",
-                )}
-              >
-                <FontAwesomeIcon icon={faChartLine} className="text-xs" />
-                Interactive Mode
-                {runCount > 0 && (
-                  <span className="text-2xs bg-brand-500/20 text-brand-400 px-1.5 rounded-full leading-none tabular-nums">{runCount}</span>
-                )}
-              </button>
+                {/* Tab: Browse */}
+                <button
+                  onClick={() => setActiveTab("browse")}
+                  className={cn(
+                    "flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-[10px] font-medium transition-all duration-150 select-none",
+                    activeTab === "browse"
+                      ? "bg-surface-50 text-fg-strong shadow-sm border border-surface-border"
+                      : "text-fg-subtle hover:text-fg-base",
+                  )}
+                >
+                  <FontAwesomeIcon icon={faDatabase} className="text-[10px]" />
+                  Browse
+                </button>
+
+                {/* Tab: Interactive Mode */}
+                <button
+                  onClick={() => setActiveTab("interactive")}
+                  className={cn(
+                    "flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-[10px] font-medium transition-all duration-150 select-none",
+                    activeTab === "interactive"
+                      ? "bg-surface-50 text-fg-strong shadow-sm border border-surface-border"
+                      : "text-fg-subtle hover:text-fg-base",
+                  )}
+                >
+                  <FontAwesomeIcon icon={faChartLine} className="text-[10px]" />
+                  Interactive
+                  {runCount > 0 && (
+                    <span className="bg-brand-500/20 text-brand-400 text-[10px] font-semibold px-1.5 py-0.5 rounded-full leading-none tabular-nums">
+                      {runCount}
+                    </span>
+                  )}
+                </button>
+
+              </div>
 
               {/* Right actions */}
               <div className="ml-auto flex items-center gap-2">
