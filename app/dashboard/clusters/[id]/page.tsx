@@ -5,15 +5,15 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faDatabase, faServer, faPlay, faStop, faRotate, faTrash,
   faArrowLeft, faSpinner, faTerminal, faChartBar, faNetworkWired,
-  faCircle, faTable,
+  faCircle, faTable, faUser, faHardDrive, faLayerGroup, faKey, faAt,
 } from "@fortawesome/free-solid-svg-icons";
 import { useCluster, useClusterStats, useClusterAction, useDeleteCluster } from "@/hooks/useClusters";
 import Topbar from "@/components/layout/Topbar";
-import type { Node } from "@/types";
+import type { Node, BrowserDatabase } from "@/types";
 import clsx from "clsx";
 import { formatDistanceToNow, format } from "date-fns";
 import Link from "next/link";
-import { clusterApi } from "@/lib/api";
+import { clusterApi, browserApi } from "@/lib/api";
 import toast from "react-hot-toast";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -37,15 +37,34 @@ export default function ClusterDetailPage() {
   const { data: stats } = useClusterStats(params.id);
   const { mutate: action, isPending: actionPending } = useClusterAction();
   const { mutate: deleteCluster, isPending: deleting } = useDeleteCluster();
-  const [activeTab, setActiveTab] = useState<"nodes" | "stats" | "logs">("nodes");
+  const [activeTab, setActiveTab] = useState<"nodes" | "databases" | "stats" | "logs">("nodes");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [logs, setLogs] = useState<string | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
+  const [databases, setDatabases] = useState<BrowserDatabase[] | null>(null);
+  const [dbsLoading, setDbsLoading] = useState(false);
+  const [dbsError, setDbsError] = useState<string | null>(null);
   const handleDelete = async () => {
     if (!confirm(`Delete cluster "${cluster?.name}"? This will remove all containers and data.`)) return;
     deleteCluster(params.id, {
       onSuccess: () => router.push("/dashboard/clusters"),
     });
+  };
+
+  const fetchDatabases = async () => {
+    if (databases !== null) return; // already loaded
+    setDbsLoading(true);
+    setDbsError(null);
+    try {
+      const data = await browserApi.listDatabases(params.id);
+      setDatabases(data.databases ?? []);
+      if (data.error) setDbsError(data.error);
+    } catch (e: any) {
+      setDbsError(e?.message ?? "Failed to load databases");
+      setDatabases([]);
+    } finally {
+      setDbsLoading(false);
+    }
   };
 
   const fetchLogs = async (nodeId: string) => {
@@ -194,12 +213,16 @@ export default function ClusterDetailPage() {
           <div className="flex gap-1 min-w-max">
           {[
             { id: "nodes", icon: faServer, label: "Nodes" },
+            { id: "databases", icon: faLayerGroup, label: "Databases" },
             { id: "stats", icon: faChartBar, label: "Stats" },
             { id: "logs", icon: faTerminal, label: "Logs" },
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as typeof activeTab)}
+              onClick={() => {
+                setActiveTab(tab.id as typeof activeTab);
+                if (tab.id === "databases" && cluster?.status === "running") fetchDatabases();
+              }}
               className={clsx(
                 "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
                 activeTab === tab.id
@@ -288,6 +311,109 @@ export default function ClusterDetailPage() {
                   </div>
                 );
               })
+            )}
+          </div>
+        )}
+
+        {/* Databases Tab */}
+        {activeTab === "databases" && (
+          <div className="card">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                <FontAwesomeIcon icon={faLayerGroup} className="text-brand-400" />
+                Databases
+              </h3>
+              <button
+                onClick={() => { setDatabases(null); fetchDatabases(); }}
+                className="btn-secondary text-xs"
+                disabled={dbsLoading}
+              >
+                <FontAwesomeIcon icon={faSpinner} className={dbsLoading ? "animate-spin" : "hidden"} />
+                Refresh
+              </button>
+            </div>
+
+            {cluster.status !== "running" ? (
+              <p className="text-slate-500 text-sm text-center py-6">
+                Cluster must be running to browse databases.
+              </p>
+            ) : dbsLoading ? (
+              <div className="flex justify-center py-8">
+                <FontAwesomeIcon icon={faSpinner} className="text-brand-400 text-2xl animate-spin" />
+              </div>
+            ) : dbsError ? (
+              <p className="text-red-400 text-sm text-center py-6">{dbsError}</p>
+            ) : !databases || databases.length === 0 ? (
+              <p className="text-slate-500 text-sm text-center py-6">No databases found.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-slate-500 border-b border-surface-border">
+                      <th className="pb-2 pr-6 font-medium">Name</th>
+                      <th className="pb-2 pr-6 font-medium">Created By</th>
+                      <th className="pb-2 pr-6 font-medium">DB User</th>
+                      {cluster.db_type !== "mysql" && (
+                        <th className="pb-2 pr-6 font-medium">Size</th>
+                      )}
+                      {cluster.db_type === "mysql" && (
+                        <th className="pb-2 font-medium">Charset / Collation</th>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-surface-border">
+                    {databases.map((db) => (
+                      <tr key={db.name} className="hover:bg-surface-100/50 transition-colors">
+                        <td className="py-2.5 pr-6">
+                          <div className="flex items-center gap-2">
+                            <FontAwesomeIcon icon={faDatabase} className="text-brand-400 text-xs" />
+                            <span className="text-white font-medium">{db.name}</span>
+                          </div>
+                        </td>
+                        <td className="py-2.5 pr-6">
+                          {db.created_by ? (
+                            <div>
+                              <div className="flex items-center gap-1.5 text-slate-200 text-sm">
+                                <FontAwesomeIcon icon={faUser} className="text-slate-500 text-xs" />
+                                {db.created_by}
+                              </div>
+                              <div className="flex items-center gap-1.5 text-slate-500 text-xs mt-0.5">
+                                <FontAwesomeIcon icon={faAt} className="text-xs" />
+                                {db.created_by_email}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-slate-500 text-xs italic">system</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 pr-6">
+                          {db.db_username ? (
+                            <div className="flex items-center gap-1.5 text-slate-300 font-mono text-xs">
+                              <FontAwesomeIcon icon={faKey} className="text-slate-500 text-xs" />
+                              {db.db_username}
+                            </div>
+                          ) : (
+                            <span className="text-slate-500 text-xs">{cluster.db_type === "postgres" ? (db.owner ?? "—") : "—"}</span>
+                          )}
+                        </td>
+                        {cluster.db_type !== "mysql" && (
+                          <td className="py-2.5 pr-6">
+                            <div className="flex items-center gap-1.5 text-slate-400">
+                              <FontAwesomeIcon icon={faHardDrive} className="text-slate-500 text-xs" />
+                              {db.size ?? "—"}
+                            </div>
+                          </td>
+                        )}
+                        {cluster.db_type === "mysql" && (
+                          <td className="py-2.5 text-slate-400 text-xs">
+                            {db.charset ?? "—"}{db.collation ? ` / ${db.collation}` : ""}
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         )}

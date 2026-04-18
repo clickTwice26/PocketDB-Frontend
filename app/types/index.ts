@@ -82,6 +82,13 @@ export interface ActionResponse {
 export interface BrowserDatabase {
   name: string;
   size?: string;
+  owner?: string;
+  charset?: string;
+  collation?: string;
+  created_by?: string;
+  created_by_email?: string;
+  db_username?: string;
+  created_at?: string;
 }
 
 export interface BrowserTable {
