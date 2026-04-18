@@ -166,26 +166,22 @@ function HeroBackground() {
         </div>
       </Suspense>
 
-      {/* Subtle gradient orbs underneath as fallback / blend layer */}
-      <motion.div
-        className="absolute w-[600px] h-[600px] rounded-full opacity-20 blur-[140px]"
+      {/* Static gradient orbs — no continuous animation to avoid GPU thrash */}
+      <div
+        className="absolute w-[600px] h-[600px] rounded-full opacity-20 blur-[140px] pointer-events-none"
         style={{
           background: "radial-gradient(circle, rgb(var(--brand-500)), transparent 70%)",
           top: "-15%",
           left: "10%",
         }}
-        animate={{ x: [0, 60, 0], y: [0, 30, 0], scale: [1, 1.15, 1] }}
-        transition={{ duration: 14, repeat: Infinity, ease: "easeInOut" }}
       />
-      <motion.div
-        className="absolute w-[500px] h-[500px] rounded-full opacity-15 blur-[120px]"
+      <div
+        className="absolute w-[500px] h-[500px] rounded-full opacity-15 blur-[120px] pointer-events-none"
         style={{
           background: "radial-gradient(circle, rgb(var(--brand-400)), transparent 70%)",
           top: "10%",
           right: "5%",
         }}
-        animate={{ x: [0, -40, 0], y: [0, 40, 0], scale: [1, 0.9, 1] }}
-        transition={{ duration: 16, repeat: Infinity, ease: "easeInOut" }}
       />
 
       {/* Grid overlay */}

@@ -470,6 +470,33 @@ export default function ClusterDetailPage() {
                             </div>
                           </div>
                         )}
+                        {s.storage_usage_mb !== undefined && (
+                          <div>
+                            <div className="flex justify-between text-xs text-slate-400 mb-1">
+                              <span>Storage</span>
+                              <span>
+                                {s.storage_usage_mb >= 1024
+                                  ? `${(s.storage_usage_mb / 1024).toFixed(1)} GB`
+                                  : `${s.storage_usage_mb?.toFixed(0)} MB`}
+                                {s.storage_limit_mb
+                                  ? s.storage_limit_mb >= 1024
+                                    ? ` / ${(s.storage_limit_mb / 1024).toFixed(0)} GB`
+                                    : ` / ${s.storage_limit_mb?.toFixed(0)} MB`
+                                  : ""}
+                              </span>
+                            </div>
+                            <div className="h-2 bg-surface-200 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-emerald-500 rounded-full transition-all"
+                                style={{
+                                  width: s.storage_limit_mb && s.storage_limit_mb > 0
+                                    ? `${Math.min((s.storage_usage_mb / s.storage_limit_mb) * 100, 100)}%`
+                                    : "0%",
+                                }}
+                              />
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <p className="text-xs text-slate-500">Node is not running.</p>

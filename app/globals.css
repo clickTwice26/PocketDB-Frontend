@@ -166,6 +166,7 @@
   }
   html {
     @apply font-sans;
+    position: relative; /* required by Lenis for correct scroll-offset calculation */
   }
 }
 

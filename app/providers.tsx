@@ -10,6 +10,16 @@ import { useAuthStore } from "@/store/auth";
 import { TooltipProvider } from "@/components/ui/tooltip";
 config.autoAddCss = false;
 
+// THREE.Clock was deprecated in r170; R3F v9 still creates one for state.clock
+// backward-compat. Suppress only that single known message.
+if (typeof window !== "undefined") {
+  const _warn = console.warn.bind(console);
+  console.warn = (...args: Parameters<typeof console.warn>) => {
+    if (typeof args[0] === "string" && args[0].startsWith("THREE.Clock")) return;
+    _warn(...args);
+  };
+}
+
 const THEME_BG: Record<string, string> = {
   dark: "#0f1117",
   light: "#f0f4fb",

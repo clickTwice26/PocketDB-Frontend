@@ -1274,7 +1274,8 @@ export default function QueryEditorPage() {
   const HISTORY_PAGE_SIZE = 20;
   // ─────────────────────────────────────────────────────────────────────────
   const [copied, setCopied]     = useState(false);
-  const [rightPanel, setRightPanel] = useState<null | "history" | "ai" | "browser" | "interactive">(null);
+  const [rightPanel, setRightPanel] = useState<null | "history" | "ai">(null);
+  const [activeTab, setActiveTab] = useState<"output" | "browse" | "interactive">("output");
   const [showExitModal, setShowExitModal] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [sessionRecords, setSessionRecords] = useState<
@@ -1342,9 +1343,10 @@ export default function QueryEditorPage() {
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
   }, []);
+
   // ────────────────────────────────────────────────────────────────────────────
 
-  const openPanel = useCallback((panel: "history" | "ai" | "browser" | "interactive" | null) => {
+  const openPanel = useCallback((panel: "history" | "ai" | null) => {
     setRightPanel(panel);
     setRightPanelWidth(null); // reset to default width for each panel type
   }, []);
@@ -1713,10 +1715,10 @@ export default function QueryEditorPage() {
 
           {/* Browser button */}
           <button
-            onClick={() => openPanel(rightPanel === "browser" ? null : "browser")}
+            onClick={() => setActiveTab(activeTab === "browse" ? "output" : "browse")}
             className={cn(
               "btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5",
-              rightPanel === "browser" && "bg-brand-500/10 border-brand-500/40 text-brand-400",
+              activeTab === "browse" && "bg-brand-500/10 border-brand-500/40 text-brand-400",
             )}
             title="Schema Browser"
           >
@@ -1751,10 +1753,10 @@ export default function QueryEditorPage() {
 
           {/* Interactive Mode button */}
           <button
-            onClick={() => openPanel(rightPanel === "interactive" ? null : "interactive")}
+            onClick={() => setActiveTab(activeTab === "interactive" ? "output" : "interactive")}
             className={cn(
               "btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5",
-              rightPanel === "interactive" && "bg-brand-500/10 border-brand-500/40 text-brand-400",
+              activeTab === "interactive" && "bg-brand-500/10 border-brand-500/40 text-brand-400",
             )}
             title="Interactive Mode — live visual output"
           >
@@ -1931,89 +1933,156 @@ export default function QueryEditorPage() {
             <div className="w-12 h-[3px] rounded-full bg-surface-border group-hover:bg-brand-500/50 transition-colors" />
           </div>
 
-          {/* Results */}
+          {/* Results / Browse / Interactive toggle area */}
           <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-            {/* Results header */}
-            <div className="shrink-0 flex items-center gap-2.5 px-4 py-2 border-b border-surface-border bg-surface-50">
-              <span className="text-xs font-semibold text-fg-base">Output</span>
 
-              {isPending && (
-                <span className="flex items-center gap-1.5 text-xs text-brand-400 ml-1">
-                  <FontAwesomeIcon icon={faSpinner} className="animate-spin text-xs" />
-                  Running…
-                </span>
-              )}
-              {result && !result.error && (
-                <>
-                  <span className="text-xs text-green-400">
-                    {result.row_count} row{result.row_count !== 1 ? "s" : ""}
-                  </span>
+            {/* Tab bar */}
+            <div className="shrink-0 flex items-center gap-1 px-3 py-2 border-b border-surface-border bg-surface-50">
+              {/* Tab: Output */}
+              <button
+                onClick={() => setActiveTab("output")}
+                className={cn(
+                  "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md font-medium transition-colors",
+                  activeTab === "output"
+                    ? "bg-brand-500/10 text-brand-400 border border-brand-500/30"
+                    : "text-fg-subtle hover:text-fg-base hover:bg-surface-100",
+                )}
+              >
+                Output
+                {isPending && <FontAwesomeIcon icon={faSpinner} className="animate-spin text-xs" />}
+                {result && !result.error && !isPending && (
+                  <span className="text-2xs text-green-400">{result.row_count} row{result.row_count !== 1 ? "s" : ""}</span>
+                )}
+                {result?.error && !isPending && <span className="text-2xs text-red-400">error</span>}
+              </button>
+
+              {/* Tab: Browse */}
+              <button
+                onClick={() => setActiveTab("browse")}
+                className={cn(
+                  "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md font-medium transition-colors",
+                  activeTab === "browse"
+                    ? "bg-brand-500/10 text-brand-400 border border-brand-500/30"
+                    : "text-fg-subtle hover:text-fg-base hover:bg-surface-100",
+                )}
+              >
+                <FontAwesomeIcon icon={faDatabase} className="text-xs" />
+                Browse
+              </button>
+
+              {/* Tab: Interactive Mode */}
+              <button
+                onClick={() => setActiveTab("interactive")}
+                className={cn(
+                  "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md font-medium transition-colors",
+                  activeTab === "interactive"
+                    ? "bg-brand-500/10 text-brand-400 border border-brand-500/30"
+                    : "text-fg-subtle hover:text-fg-base hover:bg-surface-100",
+                )}
+              >
+                <FontAwesomeIcon icon={faChartLine} className="text-xs" />
+                Interactive Mode
+                {runCount > 0 && (
+                  <span className="text-2xs bg-brand-500/20 text-brand-400 px-1.5 rounded-full leading-none tabular-nums">{runCount}</span>
+                )}
+              </button>
+
+              {/* Right actions */}
+              <div className="ml-auto flex items-center gap-2">
+                {activeTab === "output" && result && (
+                  <button
+                    onClick={handleCopy}
+                    className="flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg-strong transition-colors"
+                  >
+                    <FontAwesomeIcon icon={copied ? faCheck : faCopy} className={cn("text-xs", copied && "text-green-400")} />
+                    {copied ? "Copied!" : "Copy"}
+                  </button>
+                )}
+                {activeTab === "interactive" && result && !result.error && (
                   <span className="text-xs text-fg-subtle">{result.execution_time_ms}ms</span>
-                </>
-              )}
-              {result?.error && <span className="text-xs text-red-400">Error</span>}
-
-              {result && (
-                <button
-                  onClick={handleCopy}
-                  className="ml-auto flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg-strong transition-colors"
-                >
-                  <FontAwesomeIcon
-                    icon={copied ? faCheck : faCopy}
-                    className={cn("text-xs", copied && "text-green-400")}
-                  />
-                  {copied ? "Copied!" : "Copy"}
-                </button>
-              )}
+                )}
+                {activeTab === "interactive" && runCount > 0 && (
+                  <button
+                    onClick={() => { setLastRunQuery(""); setRunCount(0); }}
+                    className="text-2xs text-fg-subtle hover:text-fg-base transition-colors px-1.5 py-0.5 rounded hover:bg-surface-100"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
             </div>
 
-            {/* Results body */}
-            <div className="flex-1 overflow-auto min-h-0">
-              {!result && !isPending && (
-                <div className="h-full flex flex-col items-center justify-center gap-3 text-center px-8">
-                  <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center", meta.bg)}>
-                    <FontAwesomeIcon icon={selectedUserDb ? meta.icon : faCode} className={cn("text-xl", meta.color)} />
+            {/* Output pane */}
+            {activeTab === "output" && (
+              <div className="flex-1 overflow-auto min-h-0">
+                {!result && !isPending && (
+                  <div className="h-full flex flex-col items-center justify-center gap-3 text-center px-8">
+                    <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center", meta.bg)}>
+                      <FontAwesomeIcon icon={selectedUserDb ? meta.icon : faCode} className={cn("text-xl", meta.color)} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-fg-base">
+                        {selectedUserDb ? `${meta.label} ready` : "Select a database to begin"}
+                      </p>
+                      <p className="text-xs text-fg-subtle mt-1">
+                        {selectedUserDb
+                          ? "Write your query above and press Ctrl + Enter"
+                          : "Choose a database from the toolbar"}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-medium text-fg-base">
-                      {selectedUserDb ? `${meta.label} ready` : "Select a database to begin"}
-                    </p>
-                    <p className="text-xs text-fg-subtle mt-1">
-                      {selectedUserDb
-                        ? "Write your query above and press Ctrl + Enter"
-                        : "Choose a database from the toolbar"}
-                    </p>
-                  </div>
-                </div>
-              )}
+                )}
 
-              {result?.error && (
-                <div className="p-4">
-                  <div className="flex items-start gap-3 p-4 rounded-lg bg-red-500/5 border border-red-500/20">
-                    <FontAwesomeIcon icon={faTriangleExclamation} className="text-red-400 mt-0.5 shrink-0" />
-                    <pre className="text-xs text-red-400 font-mono whitespace-pre-wrap break-all flex-1 min-w-0">
-                      {result.error}
-                    </pre>
+                {result?.error && (
+                  <div className="p-4">
+                    <div className="flex items-start gap-3 p-4 rounded-lg bg-red-500/5 border border-red-500/20">
+                      <FontAwesomeIcon icon={faTriangleExclamation} className="text-red-400 mt-0.5 shrink-0" />
+                      <pre className="text-xs text-red-400 font-mono whitespace-pre-wrap break-all flex-1 min-w-0">
+                        {result.error}
+                      </pre>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {result && !result.error && (
-                isRedis ? <RedisOutput result={result} /> : <SqlTable result={result} />
-              )}
-            </div>
-          </div>
+                {result && !result.error && (
+                  isRedis ? <RedisOutput result={result} /> : <SqlTable result={result} />
+                )}
+              </div>
+            )}
+
+            {/* Browse pane */}
+            {activeTab === "browse" && (
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <SchemaBrowserPanel
+                  clusterId={selectedClusterId}
+                  dbType={dbType}
+                  initialDatabase={selectedDatabase || undefined}
+                />
+              </div>
+            )}
+
+            {/* Interactive Mode pane */}
+            {activeTab === "interactive" && (
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <InteractiveModePanel
+                  clusterId={selectedClusterId ?? ""}
+                  database={selectedDatabase}
+                  dbType={dbType}
+                  lastQuery={lastRunQuery}
+                  lastResult={result}
+                  isRunning={isPending}
+                />
+              </div>
+            )}
+
+          </div>{/* /Results / Browse / Interactive toggle area */}
         </div>
 
-        {/* ── Right panel: History / AI / Browser ─────────────────────── */}
+        {/* ── Right panel: History / AI ─────────────────────────────── */}
         {rightPanel && (
         <div
           className="shrink-0 flex flex-row border-l border-surface-border bg-surface overflow-hidden"
-          style={{
-            width: rightPanelWidth
-              ? rightPanelWidth
-              : rightPanel === "browser" ? 680 : 320,
-          }}
+          style={{ width: rightPanelWidth ?? 320 }}
         >
           {/* Horizontal drag handle */}
           <div
@@ -2030,36 +2099,18 @@ export default function QueryEditorPage() {
             <div className="shrink-0 flex items-center justify-between px-3 py-2.5 border-b border-surface-border bg-surface-50">
               <span className="flex items-center gap-2 text-xs font-semibold text-fg-base">
                 <FontAwesomeIcon
-                  icon={
-                    rightPanel === "history"     ? faClockRotateLeft :
-                    rightPanel === "browser"     ? faDatabase :
-                    rightPanel === "interactive" ? faChartLine :
-                    faRobot
-                  }
+                  icon={rightPanel === "history" ? faClockRotateLeft : faRobot}
                   className="text-brand-400 text-xs"
                 />
-                {rightPanel === "history"     ? "Query History"    :
-                 rightPanel === "browser"     ? "Schema Browser"   :
-                 rightPanel === "interactive" ? "Interactive Mode" :
-                 "AI Assistant"}
+                {rightPanel === "history" ? "Query History" : "AI Assistant"}
               </span>
               <div className="flex items-center gap-1.5">
-                {rightPanel !== "browser" && (
-                  <button
-                    onClick={() => openPanel(rightPanel === "history" ? "ai" : rightPanel === "ai" ? "interactive" : "history")}
+                <button
+                    onClick={() => openPanel(rightPanel === "history" ? "ai" : "history")}
                     className="text-2xs text-fg-subtle hover:text-fg-base transition-colors px-1.5 py-0.5 rounded hover:bg-surface-100"
                   >
-                    Switch to {rightPanel === "history" ? "AI" : rightPanel === "ai" ? "Live" : "History"}
+                    Switch to {rightPanel === "history" ? "AI" : "History"}
                   </button>
-                )}
-                {rightPanel === "interactive" && runCount > 0 && (
-                  <button
-                    onClick={() => { setLastRunQuery(""); setRunCount(0); }}
-                    className="text-2xs text-fg-subtle hover:text-fg-base transition-colors px-1.5 py-0.5 rounded hover:bg-surface-100"
-                  >
-                    Reset
-                  </button>
-                )}
                 <button
                   onClick={() => openPanel(null)}
                   className="w-6 h-6 flex items-center justify-center rounded-md text-fg-subtle hover:text-fg-base hover:bg-surface-100 transition-colors"
@@ -2214,30 +2265,6 @@ export default function QueryEditorPage() {
               </div>
             )}
 
-            {/* Browser content */}
-            {rightPanel === "browser" && (
-              <div className="flex-1 min-h-0 overflow-hidden">
-                <SchemaBrowserPanel
-                  clusterId={selectedClusterId}
-                  dbType={dbType}
-                  initialDatabase={selectedDatabase || undefined}
-                />
-              </div>
-            )}
-
-            {/* Interactive Mode content */}
-            {rightPanel === "interactive" && (
-              <div className="flex-1 min-h-0 overflow-hidden">
-                <InteractiveModePanel
-                  clusterId={selectedClusterId ?? ""}
-                  database={selectedDatabase}
-                  dbType={dbType}
-                  lastQuery={lastRunQuery}
-                  lastResult={result}
-                  isRunning={isPending}
-                />
-              </div>
-            )}
           </div>
         </div>
         )}

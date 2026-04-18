@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useMemo } from "react";
+import { useRef, useMemo, useEffect } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Float, MeshDistortMaterial, Sphere } from "@react-three/drei";
 import * as THREE from "three";
@@ -130,15 +130,15 @@ function CoreSphere() {
 
   return (
     <Float speed={2} rotationIntensity={0.3} floatIntensity={0.5}>
-      <Sphere ref={ref} args={[0.6, 64, 64]} position={[0, 0, 0]}>
+      <Sphere ref={ref} args={[0.6, 32, 32]} position={[0, 0, 0]}>
         <MeshDistortMaterial
           color="#6366f1"
           emissive="#4f46e5"
           emissiveIntensity={0.5}
           roughness={0.2}
           metalness={0.8}
-          distort={0.25}
-          speed={3}
+          distort={0.15}
+          speed={1.5}
           transparent
           opacity={0.85}
         />
@@ -176,7 +176,7 @@ function OrbitNode({
 
   return (
     <Float speed={1.5} rotationIntensity={0.2} floatIntensity={0.3}>
-      <Sphere ref={ref} args={[size, 32, 32]} position={position}>
+      <Sphere ref={ref} args={[size, 16, 16]} position={position}>
         <meshStandardMaterial
           color={color}
           emissive={color}
@@ -217,24 +217,20 @@ function CameraRig() {
   const { camera } = useThree();
   const mouse = useRef({ x: 0, y: 0 });
 
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      mouse.current.x = (e.clientX / window.innerWidth - 0.5) * 2;
+      mouse.current.y = -(e.clientY / window.innerHeight - 0.5) * 2;
+    };
+    window.addEventListener("mousemove", handler, { passive: true });
+    return () => window.removeEventListener("mousemove", handler);
+  }, []);
+
   useFrame(() => {
     camera.position.x += (mouse.current.x * 0.5 - camera.position.x) * 0.02;
     camera.position.y += (mouse.current.y * 0.3 - camera.position.y) * 0.02;
     camera.lookAt(0, 0, 0);
   });
-
-  // Listen for mouse on the window
-  if (typeof window !== "undefined") {
-    const handler = (e: MouseEvent) => {
-      mouse.current.x = (e.clientX / window.innerWidth - 0.5) * 2;
-      mouse.current.y = -(e.clientY / window.innerHeight - 0.5) * 2;
-    };
-    // Register once (idempotent via named fn approach is ok for effect-less usage)
-    if (!(window as any).__heroMouseSet) {
-      window.addEventListener("mousemove", handler, { passive: true });
-      (window as any).__heroMouseSet = true;
-    }
-  }
 
   return null;
 }
@@ -285,7 +281,7 @@ function Scene() {
       ))}
 
       <ConnectionLines positions={nodePositions} />
-      <DataParticles count={80} />
+      <DataParticles count={40} />
 
       <OrbitRing radius={2.8} tilt={Math.PI / 6} />
       <OrbitRing radius={3.5} tilt={-Math.PI / 8} />
@@ -301,8 +297,8 @@ export default function HeroScene() {
     <div className="absolute inset-0 pointer-events-none">
       <Canvas
         camera={{ position: [0, 0, 6], fov: 50 }}
-        dpr={[1, 1.5]}
-        gl={{ antialias: true, alpha: true }}
+        dpr={[1, 1]}
+        gl={{ antialias: false, alpha: true, powerPreference: "low-power" }}
         style={{ pointerEvents: "none" }}
       >
         <Scene />

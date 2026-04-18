@@ -9,6 +9,7 @@ export interface Node {
   internal_port: number;
   cpu_limit: string | null;
   memory_limit: string | null;
+  storage_limit: string | null;
   is_healthy: boolean;
   last_health_check: string | null;
   created_at: string;

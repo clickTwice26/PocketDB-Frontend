@@ -5,6 +5,7 @@ import {
   faXmark, faDatabase, faKey, faSpinner, faCheck,
   faLayerGroup, faCircleNodes, faBolt,
   faEye, faEyeSlash, faPlus, faServer, faLock,
+  faMicrochip, faMemory, faHardDrive,
 } from "@fortawesome/free-solid-svg-icons";
 import { useCreateCluster } from "@/hooks/useClusters";
 import { useUIStore } from "@/store/ui";
@@ -58,6 +59,24 @@ const ENGINES: {
 const DEFAULT_PORTS:    Record<DbType, number> = { postgres: 5433,  mysql: 3307,  redis: 6380 };
 const DEFAULT_VERSIONS: Record<DbType, string> = { postgres: "16",  mysql: "8.0", redis: "7"  };
 
+const CPU_OPTIONS    = ["0.5", "1", "2", "4"] as const;
+const MEMORY_OPTIONS = [
+  { value: "128m",  label: "128 MB"  },
+  { value: "256m",  label: "256 MB"  },
+  { value: "512m",  label: "512 MB"  },
+  { value: "1g",    label: "1 GB"    },
+  { value: "2g",    label: "2 GB"    },
+  { value: "4g",    label: "4 GB"    },
+] as const;
+const STORAGE_OPTIONS = [
+  { value: "5g",   label: "5 GB"   },
+  { value: "10g",  label: "10 GB"  },
+  { value: "20g",  label: "20 GB"  },
+  { value: "50g",  label: "50 GB"  },
+  { value: "100g", label: "100 GB" },
+  { value: "200g", label: "200 GB" },
+] as const;
+
 function makeForm(type: DbType) {
   return {
     db_type:      type,
@@ -71,6 +90,7 @@ function makeForm(type: DbType) {
     node_count:   1,
     cpu_limit:    "1",
     memory_limit: "128m",
+    storage_limit: "10g",
     base_port:    DEFAULT_PORTS[type],
     tags:         {},
   };
@@ -148,7 +168,7 @@ export default function CreateClusterModal() {
       />
 
       {/* Modal */}
-      <div className="relative bg-surface-50 border border-surface-border rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col animate-slide-up">
+      <div className="relative bg-surface-50 border border-surface-border rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col animate-slide-up">
 
         {/* ── Header ─────────────────────────────────────────── */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-surface-border">
@@ -173,120 +193,203 @@ export default function CreateClusterModal() {
         </div>
 
         {/* ── Body ───────────────────────────────────────────── */}
-        <div className="px-6 py-5 space-y-5 overflow-y-auto flex-1">
+        <div className="px-6 py-5 flex gap-6 overflow-y-auto flex-1">
 
-          {/* Engine selector */}
-          <div>
-            <p className="text-xs font-semibold text-fg-subtle uppercase tracking-widest mb-3">
-              Choose Engine
-            </p>
-            <div className="grid grid-cols-3 gap-2">
-              {ENGINES.map((eng) => {
-                const isActive = engine === eng.type;
-                return (
+          {/* ── Left column: identity ── */}
+          <div className="flex-1 min-w-0 space-y-5">
+
+            {/* Engine selector */}
+            <div>
+              <p className="text-xs font-semibold text-fg-subtle uppercase tracking-widest mb-3">
+                Choose Engine
+              </p>
+              <div className="grid grid-cols-3 gap-2">
+                {ENGINES.map((eng) => {
+                  const isActive = engine === eng.type;
+                  return (
+                    <button
+                      key={eng.type}
+                      type="button"
+                      onClick={() => handleEngineSelect(eng.type)}
+                      className={cn(
+                        "relative flex flex-col items-center gap-2 p-3.5 rounded-xl border-2 transition-all duration-150",
+                        isActive
+                          ? `${eng.activeBg} ${eng.activeBorder}`
+                          : "border-surface-border bg-surface-100 hover:border-surface-200 hover:bg-surface-200/50"
+                      )}
+                    >
+                      {isActive && (
+                        <span className={cn(
+                          "absolute top-2 right-2 w-4 h-4 rounded-full flex items-center justify-center text-xs text-white",
+                          eng.iconColor.replace("text-", "bg-")
+                        )}>
+                          <FontAwesomeIcon icon={faCheck} />
+                        </span>
+                      )}
+                      <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center", eng.iconBg)}>
+                        <FontAwesomeIcon icon={eng.icon} className={cn("text-sm", eng.iconColor)} />
+                      </div>
+                      <span className={cn("text-xs font-semibold", isActive ? eng.iconColor : "text-fg-muted")}>
+                        {eng.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Cluster name */}
+            <div>
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-fg-subtle uppercase tracking-widest mb-2">
+                <FontAwesomeIcon icon={faDatabase} />
+                Cluster Name
+              </label>
+              <input
+                className="input"
+                placeholder={`my-${engine}-cluster`}
+                value={form.name}
+                onChange={(e) => set("name", e.target.value.replace(/[^a-zA-Z0-9_-]/g, ""))}
+                onKeyDown={(e) => e.key === "Enter" && canSubmit && handleSubmit()}
+                autoFocus
+              />
+              <p className="text-xs text-fg-subtle mt-1.5">
+                Letters, numbers, underscores and hyphens only.
+              </p>
+            </div>
+
+            {/* Password */}
+            <div>
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-fg-subtle uppercase tracking-widest mb-2">
+                <FontAwesomeIcon icon={faKey} />
+                Password
+                {isRedis && (
+                  <span className="normal-case font-normal text-fg-subtle ml-1">(optional)</span>
+                )}
+              </label>
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  className="input pr-10"
+                  placeholder={isRedis ? "Leave blank for no auth" : "Min 8 characters"}
+                  value={form.db_password}
+                  onChange={(e) => set("db_password", e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && canSubmit && handleSubmit()}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-fg-muted hover:text-fg-strong transition-colors"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  <FontAwesomeIcon icon={showPassword ? faEyeSlash : faEye} className="text-xs" />
+                </button>
+              </div>
+              {!isRedis && form.db_password.length > 0 && form.db_password.length < 8 && (
+                <p className="text-xs text-red-500 mt-1.5">At least 8 characters required.</p>
+              )}
+            </div>
+
+            {/* Version + Port */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-surface-100 border border-surface-border rounded-xl px-3 py-2.5 flex items-center gap-2.5">
+                <FontAwesomeIcon icon={faDatabase} className="text-xs text-fg-subtle shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-2xs text-fg-subtle uppercase tracking-wide">Version</p>
+                  <p className="text-xs font-bold text-fg-strong">{DEFAULT_VERSIONS[engine]}</p>
+                </div>
+              </div>
+              <div className="bg-surface-100 border border-surface-border rounded-xl px-3 py-2.5 flex items-center gap-2.5">
+                <FontAwesomeIcon icon={faServer} className="text-xs text-fg-subtle shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-2xs text-fg-subtle uppercase tracking-wide">Port</p>
+                  <p className="text-xs font-bold text-fg-strong">{DEFAULT_PORTS[engine]}</p>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          {/* Vertical divider */}
+          <div className="w-px bg-surface-border self-stretch" />
+
+          {/* ── Right column: resources ── */}
+          <div className="flex-1 min-w-0 space-y-5">
+
+            {/* CPU limit */}
+            <div>
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-fg-subtle uppercase tracking-widest mb-2">
+                <FontAwesomeIcon icon={faMicrochip} />
+                CPU Limit <span className="normal-case font-normal">(cores)</span>
+              </label>
+              <div className="grid grid-cols-4 gap-2">
+                {CPU_OPTIONS.map((opt) => (
                   <button
-                    key={eng.type}
+                    key={opt}
                     type="button"
-                    onClick={() => handleEngineSelect(eng.type)}
+                    onClick={() => set("cpu_limit", opt)}
                     className={cn(
-                      "relative flex flex-col items-center gap-2 p-3.5 rounded-xl border-2 transition-all duration-150",
-                      isActive
-                        ? `${eng.activeBg} ${eng.activeBorder}`
-                        : "border-surface-border bg-surface-100 hover:border-surface-200 hover:bg-surface-200/50"
+                      "py-2 rounded-xl border text-xs font-bold transition-all",
+                      form.cpu_limit === opt
+                        ? "bg-brand-500/10 border-brand-500/50 text-brand-400"
+                        : "bg-surface-100 border-surface-border text-fg-muted hover:border-brand-500/30 hover:text-fg-base",
                     )}
                   >
-                    {/* Active check badge */}
-                    {isActive && (
-                      <span className={cn(
-                        "absolute top-2 right-2 w-4 h-4 rounded-full flex items-center justify-center text-xs text-white",
-                        eng.iconColor.replace("text-", "bg-")
-                      )}>
-                        <FontAwesomeIcon icon={faCheck} />
-                      </span>
-                    )}
-                    <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center", eng.iconBg)}>
-                      <FontAwesomeIcon icon={eng.icon} className={cn("text-sm", eng.iconColor)} />
-                    </div>
-                    <span className={cn(
-                      "text-xs font-semibold",
-                      isActive ? eng.iconColor : "text-fg-muted"
-                    )}>
-                      {eng.label}
-                    </span>
+                    {opt}
                   </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Divider */}
-          <div className="h-px bg-surface-border" />
-
-          {/* Cluster name */}
-          <div>
-            <label className="flex items-center gap-1.5 text-xs font-semibold text-fg-subtle uppercase tracking-widest mb-2">
-              <FontAwesomeIcon icon={faDatabase} />
-              Cluster Name
-            </label>
-            <input
-              className="input"
-              placeholder={`my-${engine}-cluster`}
-              value={form.name}
-              onChange={(e) => set("name", e.target.value.replace(/[^a-zA-Z0-9_-]/g, ""))}
-              onKeyDown={(e) => e.key === "Enter" && canSubmit && handleSubmit()}
-              autoFocus
-            />
-            <p className="text-xs text-fg-subtle mt-1.5">
-              Letters, numbers, underscores and hyphens only.
-            </p>
-          </div>
-
-          {/* Password */}
-          <div>
-            <label className="flex items-center gap-1.5 text-xs font-semibold text-fg-subtle uppercase tracking-widest mb-2">
-              <FontAwesomeIcon icon={faKey} />
-              Password
-              {isRedis && (
-                <span className="normal-case font-normal text-fg-subtle ml-1">(optional)</span>
-              )}
-            </label>
-            <div className="relative">
-              <input
-                type={showPassword ? "text" : "password"}
-                className="input pr-10"
-                placeholder={isRedis ? "Leave blank for no auth" : "Min 8 characters"}
-                value={form.db_password}
-                onChange={(e) => set("db_password", e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && canSubmit && handleSubmit()}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((v) => !v)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-fg-muted hover:text-fg-strong transition-colors"
-                aria-label={showPassword ? "Hide password" : "Show password"}
-              >
-                <FontAwesomeIcon icon={showPassword ? faEyeSlash : faEye} className="text-xs" />
-              </button>
-            </div>
-            {!isRedis && form.db_password.length > 0 && form.db_password.length < 8 && (
-              <p className="text-xs text-red-500 mt-1.5">At least 8 characters required.</p>
-            )}
-          </div>
-
-          {/* Config strip */}
-          <div className="grid grid-cols-4 gap-2">
-            {[
-              { icon: faDatabase,     label: "Version", value: DEFAULT_VERSIONS[engine] },
-              { icon: faServer,       label: "Port",    value: String(DEFAULT_PORTS[engine]) },
-              { icon: faCircleNodes,  label: "Type",    value: "Standalone" },
-              { icon: faLayerGroup,   label: "Memory",  value: "128 MB" },
-            ].map((item) => (
-              <div key={item.label} className="bg-surface-100 border border-surface-border rounded-xl px-2 py-2.5 text-center">
-                <FontAwesomeIcon icon={item.icon} className="text-xs text-fg-subtle mb-1" />
-                <p className="text-xs text-fg-subtle uppercase tracking-wide leading-none mb-1">{item.label}</p>
-                <p className="text-xs font-bold text-fg-strong">{item.value}</p>
+                ))}
               </div>
-            ))}
+            </div>
+
+            {/* Memory limit */}
+            <div>
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-fg-subtle uppercase tracking-widest mb-2">
+                <FontAwesomeIcon icon={faMemory} />
+                Memory Limit
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {MEMORY_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => set("memory_limit", opt.value)}
+                    className={cn(
+                      "py-2 rounded-xl border text-xs font-bold transition-all",
+                      form.memory_limit === opt.value
+                        ? "bg-brand-500/10 border-brand-500/50 text-brand-400"
+                        : "bg-surface-100 border-surface-border text-fg-muted hover:border-brand-500/30 hover:text-fg-base",
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Storage limit */}
+            <div>
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-fg-subtle uppercase tracking-widest mb-2">
+                <FontAwesomeIcon icon={faHardDrive} />
+                Storage Limit
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {STORAGE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => set("storage_limit", opt.value)}
+                    className={cn(
+                      "py-2 rounded-xl border text-xs font-bold transition-all",
+                      form.storage_limit === opt.value
+                        ? "bg-brand-500/10 border-brand-500/50 text-brand-400"
+                        : "bg-surface-100 border-surface-border text-fg-muted hover:border-brand-500/30 hover:text-fg-base",
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
           </div>
         </div>
 
