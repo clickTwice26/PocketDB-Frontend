@@ -5,7 +5,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faKey, faLink, faSitemap, faSpinner, faTriangleExclamation,
   faMagnifyingGlassPlus, faMagnifyingGlassMinus, faRotateRight,
-  faArrowLeft, faCircleInfo,
+  faArrowLeft, faCircleInfo, faFileImage,
 } from "@fortawesome/free-solid-svg-icons";
 import Link from "next/link";
 import { adminApi, type SystemErdTable } from "@/lib/api";
@@ -27,8 +27,16 @@ function tableHeight(t: SystemErdTable): number {
   return HEADER_H + Math.max(1, t.columns.length) * COL_H + 8;
 }
 
-function colTypeColor(udt: string): string {
+function colTypeColor(udt: string, forExport = false): string {
   const t = udt.toLowerCase();
+  if (forExport) {
+    if (/int|serial|bigint|smallint|numeric|decimal|float|double/.test(t)) return "#2563eb";
+    if (/char|text|varchar|string|enum/.test(t))  return "#059669";
+    if (/bool/.test(t))                           return "#d97706";
+    if (/date|time|timestamp/.test(t))            return "#7c3aed";
+    if (/json|uuid/.test(t))                      return "#ea580c";
+    return "#64748b";
+  }
   if (/int|serial|bigint|smallint|numeric|decimal|float|double/.test(t)) return "#60a5fa";
   if (/char|text|varchar|string|enum/.test(t))  return "#34d399";
   if (/bool/.test(t))                           return "#f59e0b";
@@ -65,6 +73,127 @@ function autoLayout(tables: SystemErdTable[]): Record<string, Pos> {
     else { x += TABLE_W + GRID_GAP_X; }
   });
   return positions;
+}
+
+// ─── PNG export ──────────────────────────────────────────────────────────────
+function escXml(s: string) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function exportToPng(tables: SystemErdTable[], positions: Record<string, Pos>) {
+  const PAD = 72;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  tables.forEach((t) => {
+    const p = positions[t.name];
+    if (!p) return;
+    minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x + TABLE_W); maxY = Math.max(maxY, p.y + tableHeight(t));
+  });
+  if (!isFinite(minX)) return;
+
+  const W  = maxX - minX + PAD * 2;
+  const H  = maxY - minY + PAD * 2;
+  const ox = -minX + PAD;
+  const oy = -minY + PAD;
+
+  const fkLines = buildFKLines(tables, positions);
+
+  // ── SVG parts ──
+  const parts: string[] = [];
+  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">`);
+  parts.push(`<defs>`);
+  parts.push(`<pattern id="g" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="rgba(100,116,139,0.18)"/></pattern>`);
+  parts.push(`<marker id="arr" markerWidth="8" markerHeight="8" refX="8" refY="3.5" orient="auto"><path d="M0,0 L0,7 L8,3.5 z" fill="#6366f1" fill-opacity="0.7"/></marker>`);
+  parts.push(`</defs>`);
+  parts.push(`<rect width="${W}" height="${H}" fill="#f8fafc"/>`);
+  parts.push(`<rect width="${W}" height="${H}" fill="url(#g)"/>`);
+
+  // FK lines
+  parts.push(`<g transform="translate(${ox},${oy})">`);
+  fkLines.forEach((ln) => {
+    parts.push(`<path d="${ln.path}" fill="none" stroke="#6366f1" stroke-width="1.3" stroke-opacity="0.55" stroke-dasharray="4 3" marker-end="url(#arr)"/>`);
+  });
+  parts.push(`</g>`);
+
+  // Tables
+  tables.forEach((t) => {
+    const p = positions[t.name];
+    if (!p) return;
+    const x = p.x + ox, y = p.y + oy;
+    const h = tableHeight(t);
+    const r = 10;
+
+    // Card shadow (fake via extra rect)
+    parts.push(`<rect x="${x+2}" y="${y+3}" width="${TABLE_W}" height="${h}" rx="${r}" fill="rgba(100,116,139,0.12)"/>`);
+    // Card body
+    parts.push(`<rect x="${x}" y="${y}" width="${TABLE_W}" height="${h}" rx="${r}" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>`);
+    // Header bg
+    parts.push(`<rect x="${x}" y="${y}" width="${TABLE_W}" height="${HEADER_H}" rx="${r}" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>`);
+    parts.push(`<rect x="${x}" y="${y + r}" width="${TABLE_W}" height="${HEADER_H - r}" fill="#f1f5f9"/>`);
+    // Divider below header
+    parts.push(`<line x1="${x}" y1="${y + HEADER_H}" x2="${x + TABLE_W}" y2="${y + HEADER_H}" stroke="#e2e8f0" stroke-width="0.8"/>`);
+    // Table name
+    parts.push(`<text x="${x + 12}" y="${y + HEADER_H / 2 + 5}" font-family="system-ui,-apple-system,sans-serif" font-size="12" font-weight="700" fill="#0f172a">${escXml(t.name)}</text>`);
+    // Column count badge
+    parts.push(`<text x="${x + TABLE_W - 10}" y="${y + HEADER_H / 2 + 5}" font-family="system-ui,sans-serif" font-size="10" fill="#94a3b8" text-anchor="end">${t.columns.length}</text>`);
+
+    // Columns
+    t.columns.forEach((col, i) => {
+      const cy = y + HEADER_H + i * COL_H;
+      const isPK = t.primary_keys.includes(col.name);
+      const isFK = t.foreign_keys.some((fk) => fk.column_name === col.name);
+
+      // Row bg tint
+      if (isPK) parts.push(`<rect x="${x}" y="${cy}" width="${TABLE_W}" height="${COL_H}" fill="rgba(245,158,11,0.07)"/>`);
+      else if (isFK) parts.push(`<rect x="${x}" y="${cy}" width="${TABLE_W}" height="${COL_H}" fill="rgba(99,102,241,0.05)"/>`);
+
+      // Row divider
+      if (i > 0) parts.push(`<line x1="${x}" y1="${cy}" x2="${x + TABLE_W}" y2="${cy}" stroke="#f1f5f9" stroke-width="0.8"/>`);
+
+      // Badge: PK / FK
+      const badgeLabelColor = isPK ? "#d97706" : isFK ? "#6366f1" : null;
+      const badgeText = isPK ? "PK" : isFK ? "FK" : null;
+      if (badgeText && badgeLabelColor) {
+        parts.push(`<rect x="${x + 6}" y="${cy + 6}" width="16" height="12" rx="3" fill="${badgeLabelColor}" fill-opacity="0.12"/>`);
+        parts.push(`<text x="${x + 14}" y="${cy + 16}" font-family="ui-monospace,monospace" font-size="8" font-weight="700" fill="${badgeLabelColor}" text-anchor="middle">${badgeText}</text>`);
+      }
+
+      // Column name
+      const nameColor = isPK ? "#b45309" : "#334155";
+      parts.push(`<text x="${x + 28}" y="${cy + COL_H / 2 + 4}" font-family="ui-monospace,monospace" font-size="11" fill="${nameColor}">${escXml(col.name)}</text>`);
+
+      // Type
+      const typeColor = colTypeColor(col.udt_name ?? col.data_type, true);
+      const typeStr   = shortType(col.udt_name ?? "", col.data_type);
+      parts.push(`<text x="${x + TABLE_W - 8}" y="${cy + COL_H / 2 + 4}" font-family="ui-monospace,monospace" font-size="10" fill="${typeColor}" fill-opacity="0.85" text-anchor="end">${escXml(typeStr)}</text>`);
+    });
+
+    // Bottom rounded cap
+    parts.push(`<rect x="${x}" y="${y + h - r}" width="${TABLE_W}" height="${r}" rx="${r}" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>`);
+    parts.push(`<rect x="${x + 1}" y="${y + h - r}" width="${TABLE_W - 2}" height="${r / 2}" fill="#ffffff"/>`);
+  });
+
+  parts.push(`</svg>`);
+  const svgStr = parts.join("");
+
+  const blob = new Blob([svgStr], { type: "image/svg+xml" });
+  const url  = URL.createObjectURL(blob);
+  const img  = new Image();
+  img.onload = () => {
+    const scale  = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width  = W * scale;
+    canvas.height = H * scale;
+    const ctx = canvas.getContext("2d")!;
+    ctx.scale(scale, scale);
+    ctx.drawImage(img, 0, 0);
+    URL.revokeObjectURL(url);
+    const a = document.createElement("a");
+    a.download = `system-erd-${new Date().toISOString().slice(0, 10)}.png`;
+    a.href = canvas.toDataURL("image/png");
+    a.click();
+  };
+  img.src = url;
 }
 
 // ─── FK lines ─────────────────────────────────────────────────────────────────
@@ -111,7 +240,8 @@ function buildFKLines(tables: SystemErdTable[], positions: Record<string, Pos>):
 }
 
 // ─── Canvas ────────────────────────────────────────────────────────────────────
-function ERDCanvas({ tables }: { tables: SystemErdTable[] }) {
+interface ERDCanvasProps { tables: SystemErdTable[]; onPositionsChange?: (p: Record<string, Pos>) => void; }
+function ERDCanvas({ tables, onPositionsChange }: ERDCanvasProps) {
   const [positions, setPositions] = useState<Record<string, Pos>>({});
   const [zoom,      setZoom]      = useState(0.78);
   const [pan,       setPan]       = useState<Pos>({ x: 32, y: 32 });
@@ -129,6 +259,9 @@ function ERDCanvas({ tables }: { tables: SystemErdTable[] }) {
   const panDragRef = useRef<PanState | null>(null);
 
   useEffect(() => { setPositions(autoLayout(tables)); }, [tables]);
+
+  // Notify parent whenever positions change
+  useEffect(() => { onPositionsChange?.(positions); }, [positions, onPositionsChange]);
 
   const fkLines = useMemo(() => buildFKLines(tables, positions), [tables, positions]);
 
@@ -358,6 +491,8 @@ function ERDCanvas({ tables }: { tables: SystemErdTable[] }) {
 export default function SystemERDPage() {
   const user = useAuthStore((s) => s.user);
   const [filter, setFilter] = useState("");
+  const [canvasPositions, setCanvasPositions] = useState<Record<string, Pos>>({});
+  const [exporting, setExporting] = useState(false);
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ["admin", "system-erd"],
@@ -426,6 +561,22 @@ export default function SystemERDPage() {
             <FontAwesomeIcon icon={faRotateRight} className={cn("text-xs", isFetching && "animate-spin")} />
             Refresh
           </button>
+
+          {/* Save PNG */}
+          <button
+            onClick={() => {
+              setExporting(true);
+              setTimeout(() => {
+                exportToPng(visibleTables, canvasPositions);
+                setExporting(false);
+              }, 50);
+            }}
+            disabled={exporting || visibleTables.length === 0}
+            className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"
+          >
+            <FontAwesomeIcon icon={faFileImage} className={cn("text-xs", exporting && "animate-pulse")} />
+            Save PNG
+          </button>
         </div>
 
         {/* ── Legend ───────────────────────────────────────────────────── */}
@@ -470,7 +621,7 @@ export default function SystemERDPage() {
               <p className="text-sm text-fg-subtle">No tables found</p>
             </div>
           ) : (
-            <ERDCanvas key={filter} tables={visibleTables} />
+            <ERDCanvas key={filter} tables={visibleTables} onPositionsChange={setCanvasPositions} />
           )}
         </div>
       </div>

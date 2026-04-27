@@ -37,8 +37,14 @@ import {
   faRocket,
   faBrain,
   faWandMagicSparkles,
+  faSpinner,
+  faRobot,
+  faClockRotateLeft,
+  faChevronDown,
+  faTableCells,
 } from "@fortawesome/free-solid-svg-icons";
 import { faDocker, faGithub } from "@fortawesome/free-brands-svg-icons";
+import { cn } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ */
 /*  Reusable animated wrapper                                          */
@@ -556,6 +562,531 @@ function EngineMarquee() {
 }
 
 /* ================================================================== */
+/*  Query Editor Live Demo                                             */
+/* ================================================================== */
+
+function renderSQLLine(line: string) {
+  if (!line.trim()) return "\u00a0";
+  const re =
+    /\b(SELECT|FROM|WHERE|JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|INNER\s+JOIN|ON|GROUP\s+BY|ORDER\s+BY|HAVING|LIMIT|OFFSET|AS|COUNT|SUM|AVG|MIN|MAX|FILTER|INTERVAL|AND|OR|NOT|IN|LIKE|DISTINCT|UPDATE|SET|INSERT|INTO|VALUES|DELETE|TRUNCATE|CREATE|DROP|ALTER|TABLE|INDEX|RETURNING|NOW)\b/gi;
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(line)) !== null) {
+    if (m.index > last)
+      parts.push(<span key={`t${last}`} className="text-slate-300">{line.slice(last, m.index)}</span>);
+    parts.push(<span key={`k${m.index}`} className="text-blue-400 font-semibold">{m[0]}</span>);
+    last = m.index + m[0].length;
+  }
+  if (last < line.length)
+    parts.push(<span key={`t${last}`} className="text-slate-300">{line.slice(last)}</span>);
+  return parts.length > 0 ? <>{parts}</> : <span className="text-slate-300">{line}</span>;
+}
+
+const QE_DEMOS = [
+  {
+    label: "Users",
+    sql: [
+      "SELECT id, name, email, role,",
+      "       created_at",
+      "FROM   users",
+      "LIMIT  5;",
+    ],
+    columns: ["id", "name", "email", "role", "created_at"],
+    rows: [
+      ["1", "Alice Johnson",  "alice@example.com",  "admin",      "2024-01-15"],
+      ["2", "Bob Smith",      "bob@example.com",    "subscriber", "2024-02-20"],
+      ["3", "Carol White",    "carol@example.com",  "normal",     "2024-03-10"],
+      ["4", "David Brown",    "david@example.com",  "subscriber", "2024-03-22"],
+      ["5", "Eve Davis",      "eve@example.com",    "normal",     "2024-04-01"],
+    ],
+    execMs: 4,
+  },
+  {
+    label: "Analytics",
+    sql: [
+      "SELECT   role,",
+      "         COUNT(*)               AS total,",
+      "         COUNT(*) FILTER (",
+      "           WHERE created_at >",
+      "                 NOW() - INTERVAL '30 days'",
+      "         )                      AS new_users",
+      "FROM     users",
+      "GROUP BY role",
+      "ORDER BY total DESC;",
+    ],
+    columns: ["role", "total", "new_users"],
+    rows: [
+      ["normal",     "183", "34"],
+      ["subscriber", "47",  "11"],
+      ["admin",      "12",  "2"],
+    ],
+    execMs: 7,
+  },
+  {
+    label: "Top Products",
+    sql: [
+      "SELECT   p.name, p.price,",
+      "         c.name           AS category,",
+      "         COUNT(oi.id)     AS orders",
+      "FROM     products   p",
+      "  JOIN   categories c",
+      "         ON c.id = p.category_id",
+      "  LEFT JOIN order_items oi",
+      "         ON oi.product_id = p.id",
+      "GROUP BY p.id, p.name, p.price, c.name",
+      "ORDER BY orders DESC",
+      "LIMIT    5;",
+    ],
+    columns: ["name", "price", "category", "orders"],
+    rows: [
+      ["Wireless Headphones", "$89.99",  "Electronics", "234"],
+      ["Running Shoes",       "$149.00", "Sports",      "187"],
+      ["Coffee Maker",        "$59.99",  "Kitchen",     "156"],
+      ["Yoga Mat",            "$35.00",  "Sports",      "134"],
+      ["Desk Lamp",           "$29.99",  "Home",        "121"],
+    ],
+    execMs: 12,
+  },
+];
+
+const QE_SCHEMA = [
+  { name: "users",       cols: ["id", "name", "email", "role", "created_at"],        pk: "id" },
+  { name: "products",    cols: ["id", "name", "price", "category_id", "stock"],       pk: "id" },
+  { name: "categories",  cols: ["id", "name", "description"],                         pk: "id" },
+  { name: "orders",      cols: ["id", "user_id", "total", "status", "created_at"],    pk: "id" },
+  { name: "order_items", cols: ["id", "order_id", "product_id", "quantity", "price"], pk: "id" },
+];
+
+function QueryEditorDemo() {
+  const [activeIdx, setActiveIdx] = useState(0);
+  const [runKey, setRunKey]       = useState(0);
+  const [isRunning, setIsRunning] = useState(false);
+  const [result, setResult]       = useState(QE_DEMOS[0]);
+  const [activeTab, setActiveTab] = useState<"output" | "browse">("output");
+  const [expanded, setExpanded]   = useState<string | null>("users");
+
+  // AI simulation state
+  const AI_PROMPTS = [
+    {
+      question: "Show top 5 products by order count",
+      answer: "Here's a query that joins products with order counts:",
+      sql: `SELECT p.name, p.price,\n  COUNT(oi.id) AS orders\nFROM products p\nLEFT JOIN order_items oi\n  ON oi.product_id = p.id\nGROUP BY p.id\nORDER BY orders DESC\nLIMIT 5;`,
+    },
+    {
+      question: "Find users who registered this month",
+      answer: "Use DATE_TRUNC to filter by the current month:",
+      sql: `SELECT id, name, email, role\nFROM users\nWHERE created_at >= DATE_TRUNC('month', NOW())\nORDER BY created_at DESC;`,
+    },
+    {
+      question: "Count orders per user with total revenue",
+      answer: "Join users with orders and aggregate the totals:",
+      sql: `SELECT u.name, u.email,\n  COUNT(o.id)    AS order_count,\n  SUM(o.total)   AS revenue\nFROM users u\nLEFT JOIN orders o ON o.user_id = u.id\nGROUP BY u.id, u.name, u.email\nORDER BY revenue DESC NULLS LAST;`,
+    },
+  ];
+  const [aiStep, setAiStep]       = useState(0);  // which prompt/answer pair
+  const [aiPhase, setAiPhase]     = useState<"typing-q" | "thinking" | "typing-a" | "done">("typing-q");
+  const [aiQDisplayed, setAiQDisplayed] = useState("");
+  const [aiADisplayed, setAiADisplayed] = useState("");
+
+  const demo = QE_DEMOS[activeIdx];
+  const aiPrompt = AI_PROMPTS[aiStep];
+
+  // Typewriter-cycle simulation
+  useEffect(() => {
+    let cancelled = false;
+
+    async function runCycle() {
+      // Phase 1: type the question
+      setAiPhase("typing-q");
+      setAiQDisplayed("");
+      setAiADisplayed("");
+      const q = aiPrompt.question;
+      for (let i = 1; i <= q.length; i++) {
+        if (cancelled) return;
+        setAiQDisplayed(q.slice(0, i));
+        await new Promise((r) => setTimeout(r, 38));
+      }
+      if (cancelled) return;
+
+      // Phase 2: thinking dots
+      setAiPhase("thinking");
+      await new Promise((r) => setTimeout(r, 900));
+      if (cancelled) return;
+
+      // Phase 3: type the answer text
+      setAiPhase("typing-a");
+      const a = aiPrompt.answer;
+      for (let i = 1; i <= a.length; i++) {
+        if (cancelled) return;
+        setAiADisplayed(a.slice(0, i));
+        await new Promise((r) => setTimeout(r, 22));
+      }
+      if (cancelled) return;
+
+      // Phase 4: show sql + pause
+      setAiPhase("done");
+      await new Promise((r) => setTimeout(r, 3200));
+      if (cancelled) return;
+
+      // Next prompt
+      setAiStep((s) => (s + 1) % AI_PROMPTS.length);
+    }
+
+    runCycle();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiStep]);
+
+  const handleRun = useCallback(() => {
+    if (isRunning) return;
+    setIsRunning(true);
+    setActiveTab("output");
+    setTimeout(() => {
+      setResult(QE_DEMOS[activeIdx]);
+      setRunKey((k) => k + 1);
+      setIsRunning(false);
+    }, 850);
+  }, [activeIdx, isRunning]);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 40 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true }}
+      transition={{ duration: 0.8, ease: [0.25, 0.4, 0.25, 1] }}
+      className="relative rounded-2xl border border-surface-border bg-surface-50/80 backdrop-blur-xl shadow-2xl shadow-black/40 overflow-hidden"
+    >
+      {/* animated top shimmer */}
+      <div className="absolute inset-0 rounded-2xl overflow-hidden pointer-events-none z-0">
+        <motion.div
+          className="absolute -top-[1px] -left-1/2 w-[200%] h-[2px] bg-gradient-to-r from-transparent via-brand-400/60 to-transparent"
+          animate={{ x: ["-100%", "100%"] }}
+          transition={{ duration: 3, repeat: Infinity, ease: "linear", repeatDelay: 2 }}
+        />
+      </div>
+
+      {/* ── Title bar ── */}
+      <div className="relative z-10 flex items-center gap-2 px-4 py-3 border-b border-surface-border bg-surface-50">
+        <div className="flex gap-1.5">
+          <span className="w-3 h-3 rounded-full bg-red-500/80" />
+          <span className="w-3 h-3 rounded-full bg-yellow-500/80" />
+          <span className="w-3 h-3 rounded-full bg-green-500/80" />
+        </div>
+        <span className="text-xs text-fg-muted ml-2 font-mono">PocketDB — Query Editor</span>
+        <div className="ml-auto flex items-center gap-1.5">
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500" />
+          </span>
+          <span className="text-xs text-fg-subtle">prod_demo · PostgreSQL 16</span>
+        </div>
+      </div>
+
+      {/* ── Toolbar ── */}
+      <div className="relative z-10 flex items-center gap-2 px-4 py-2 border-b border-surface-border bg-surface-50/70 flex-wrap gap-y-1.5">
+        {/* DB picker chip */}
+        <div className="flex items-center gap-2 h-8 px-2.5 rounded-lg border border-surface-border bg-surface text-xs shrink-0 cursor-default">
+          <FontAwesomeIcon icon={faDatabase} className="text-blue-400 text-xs" />
+          <span className="text-fg-base font-mono font-medium">prod_demo</span>
+          <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 ml-1">PG</span>
+          <FontAwesomeIcon icon={faChevronDown} className="text-fg-subtle text-[10px] ml-1" />
+        </div>
+
+        {/* Query switcher tabs */}
+        <div className="flex items-center gap-1">
+          {QE_DEMOS.map((q, i) => (
+            <button
+              key={i}
+              onClick={() => setActiveIdx(i)}
+              className={cn(
+                "px-2.5 py-1 rounded text-xs transition-colors whitespace-nowrap border",
+                activeIdx === i
+                  ? "bg-brand-500/20 text-brand-400 border-brand-500/40"
+                  : "text-fg-subtle hover:text-fg-base hover:bg-surface-100 border-transparent",
+              )}
+            >
+              {q.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="ml-auto flex items-center gap-2">
+          <button className="btn-secondary text-xs py-1 px-2.5 flex items-center gap-1.5">
+            <FontAwesomeIcon icon={faClockRotateLeft} className="text-xs" />
+            <span className="hidden sm:inline">History</span>
+            <span className="bg-brand-500/20 text-brand-400 px-1.5 rounded-full text-[10px] leading-none py-0.5">12</span>
+          </button>
+          <button className="btn-secondary text-xs py-1 px-2.5 flex items-center gap-1.5 bg-brand-500/10 border-brand-500/40 text-brand-400">
+            <FontAwesomeIcon icon={faRobot} className="text-xs" />
+            <span className="hidden sm:inline">AI</span>
+          </button>
+          <button
+            onClick={handleRun}
+            disabled={isRunning}
+            className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5 disabled:opacity-70"
+          >
+            <FontAwesomeIcon icon={isRunning ? faSpinner : faPlay} className={cn("text-xs", isRunning && "animate-spin")} />
+            {isRunning ? "Running…" : "Run"}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Main 3-column area ── */}
+      <div className="relative z-10 flex" style={{ height: 500 }}>
+
+        {/* Schema sidebar */}
+        <div className="w-44 border-r border-surface-border overflow-y-auto shrink-0 bg-surface hidden lg:block">
+          <div className="p-2">
+            <p className="text-[10px] font-semibold text-fg-subtle uppercase tracking-wider px-1 py-1.5 mb-0.5">Schema</p>
+            {QE_SCHEMA.map((table) => (
+              <div key={table.name} className="mb-0.5">
+                <button
+                  onClick={() => setExpanded(expanded === table.name ? null : table.name)}
+                  className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded hover:bg-surface-100 text-left"
+                >
+                  <FontAwesomeIcon icon={faTableCells} className="text-brand-400 text-[10px] shrink-0" />
+                  <span className="text-xs font-mono text-fg-base flex-1 truncate">{table.name}</span>
+                  <FontAwesomeIcon
+                    icon={faChevronDown}
+                    className={cn("text-fg-subtle text-[9px] shrink-0 transition-transform", expanded === table.name && "rotate-180")}
+                  />
+                </button>
+                {expanded === table.name && (
+                  <div className="ml-3.5 border-l border-surface-border pl-2 mb-1">
+                    {table.cols.map((col) => (
+                      <div key={col} className="flex items-center gap-1.5 py-[3px]">
+                        <span className={cn("w-1.5 h-1.5 rounded-sm shrink-0", col === table.pk ? "bg-yellow-400" : "bg-fg-subtle/25")} />
+                        <span className="text-[10px] font-mono text-fg-subtle">{col}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Center: editor + results */}
+        <div className="flex-1 flex flex-col min-w-0">
+
+          {/* SQL editor — always dark regardless of page theme */}
+          <div className="border-b border-surface-border flex flex-col shrink-0" style={{ height: "46%" }}>
+            <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[#30363d] bg-[#161b22] shrink-0">
+              <FontAwesomeIcon icon={faCode} className="text-[#6e7681] text-[10px]" />
+              <span className="text-[10px] text-[#8b949e] font-mono">editor.sql</span>
+              <span className="ml-auto text-[10px] text-[#6e7681]">⌘↵ to run</span>
+            </div>
+            <div className="flex-1 overflow-auto bg-[#0d1117] p-3 font-mono text-xs leading-relaxed">
+              {demo.sql.map((line, li) => (
+                <div key={`${activeIdx}-${li}`} className="flex items-start min-h-[1.4rem]">
+                  <span className="text-[#3d444d] w-5 text-right mr-4 select-none text-[10px] leading-relaxed shrink-0">
+                    {li + 1}
+                  </span>
+                  <span>{renderSQLLine(line)}</span>
+                </div>
+              ))}
+              <div className="flex items-start min-h-[1.4rem] mt-0.5">
+                <span className="w-5 mr-4 shrink-0" />
+                <motion.span
+                  animate={{ opacity: [1, 0] }}
+                  transition={{ duration: 0.6, repeat: Infinity }}
+                  className="inline-block w-[2px] h-[14px] bg-brand-400 rounded-[1px]"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Results */}
+          <div className="flex-1 flex flex-col min-h-0">
+            {/* Tab bar */}
+            <div className="flex items-center gap-1 px-3 py-1.5 border-b border-surface-border bg-surface-50/60 shrink-0">
+              {(["output", "browse"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={cn(
+                    "text-xs px-3 py-1 rounded capitalize transition-colors",
+                    activeTab === tab ? "bg-brand-500/20 text-brand-400" : "text-fg-subtle hover:text-fg-base",
+                  )}
+                >
+                  {tab === "output" ? "Output" : "Browse"}
+                </button>
+              ))}
+              {isRunning ? (
+                <span className="ml-auto flex items-center gap-1.5 text-[10px] text-brand-400">
+                  <FontAwesomeIcon icon={faSpinner} className="animate-spin text-[10px]" />
+                  Executing…
+                </span>
+              ) : (
+                <span className="ml-auto text-[10px] text-green-400">{result.rows.length} rows · {result.execMs}ms</span>
+              )}
+            </div>
+
+            <div className="flex-1 overflow-auto min-h-0">
+              {activeTab === "output" ? (
+                <table className="w-full text-xs border-collapse">
+                  <thead className="sticky top-0 z-10 bg-surface-100">
+                    <tr>
+                      {result.columns.map((col) => (
+                        <th key={col} className="text-left px-3 py-2 text-fg-subtle font-semibold border-b border-surface-border whitespace-nowrap text-[11px]">
+                          {col}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.rows.map((row, ri) => (
+                      <motion.tr
+                        key={`${runKey}-${ri}`}
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: ri * 0.045, duration: 0.22 }}
+                        className="border-b border-surface-border/40 hover:bg-surface-100/50 transition-colors"
+                      >
+                        {row.map((cell, ci) => (
+                          <td key={ci} className="px-3 py-1.5 text-fg-base font-mono text-[11px] max-w-[200px] truncate">
+                            {cell}
+                          </td>
+                        ))}
+                      </motion.tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="p-3 space-y-1.5">
+                  {QE_SCHEMA.map((t) => (
+                    <div key={t.name} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-surface-100 border border-surface-border hover:border-brand-500/30 transition-colors cursor-default">
+                      <FontAwesomeIcon icon={faTableCells} className="text-brand-400 text-xs" />
+                      <span className="font-mono text-xs text-fg-base flex-1">{t.name}</span>
+                      <span className="text-[10px] text-fg-subtle">{t.cols.length} cols</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* AI panel — always visible, animated simulation */}
+        <div className="border-l border-surface-border flex flex-col overflow-hidden shrink-0 bg-surface w-[260px] xl:w-[290px] hidden md:flex">
+          {/* Panel header */}
+          <div className="flex items-center gap-2 px-3 py-2.5 border-b border-surface-border bg-surface-50 shrink-0">
+            <div className="w-5 h-5 rounded bg-brand-600/20 flex items-center justify-center shrink-0">
+              <FontAwesomeIcon icon={faRobot} className="text-brand-400" style={{ fontSize: "9px" }} />
+            </div>
+            <span className="text-xs font-semibold text-fg-base">AI Assistant</span>
+            <span className="ml-auto text-[10px] text-brand-400 bg-brand-500/10 px-1.5 py-0.5 rounded-full">Gemini 2.0</span>
+          </div>
+
+          {/* Messages area */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
+            {/* User bubble — typewriter */}
+            <div className="flex justify-end">
+              <div className="bg-brand-600/20 border border-brand-500/30 rounded-2xl rounded-tr-sm px-3 py-2 max-w-[92%] min-h-[32px]">
+                <p className="text-xs text-fg-base break-words">
+                  {aiQDisplayed}
+                  {(aiPhase === "typing-q") && (
+                    <motion.span
+                      animate={{ opacity: [1, 0] }}
+                      transition={{ duration: 0.5, repeat: Infinity }}
+                      className="inline-block w-[2px] h-[11px] bg-brand-400 ml-[2px] align-text-bottom rounded-[1px]"
+                    />
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {/* Thinking dots */}
+            {aiPhase === "thinking" && (
+              <div className="flex items-center gap-2 pl-1">
+                <div className="w-5 h-5 rounded bg-brand-600/20 flex items-center justify-center shrink-0">
+                  <FontAwesomeIcon icon={faRobot} className="text-brand-400" style={{ fontSize: "9px" }} />
+                </div>
+                <div className="flex items-center gap-1 py-1">
+                  {[0, 160, 320].map((delay, i) => (
+                    <span
+                      key={i}
+                      className="w-1.5 h-1.5 rounded-full bg-brand-400/70 animate-bounce"
+                      style={{ animationDelay: `${delay}ms`, animationDuration: "1s" }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* AI response */}
+            {(aiPhase === "typing-a" || aiPhase === "done") && (
+              <div>
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <div className="w-5 h-5 rounded bg-brand-600/20 flex items-center justify-center shrink-0">
+                    <FontAwesomeIcon icon={faRobot} className="text-brand-400" style={{ fontSize: "9px" }} />
+                  </div>
+                  <span className="text-[10px] text-brand-400 font-semibold">PocketDB AI</span>
+                </div>
+                <div className="pl-6 space-y-2">
+                  <p className="text-xs text-fg-base leading-relaxed">
+                    {aiADisplayed}
+                    {aiPhase === "typing-a" && (
+                      <motion.span
+                        animate={{ opacity: [1, 0] }}
+                        transition={{ duration: 0.5, repeat: Infinity }}
+                        className="inline-block w-[2px] h-[11px] bg-brand-400 ml-[2px] align-text-bottom rounded-[1px]"
+                      />
+                    )}
+                  </p>
+
+                  {/* SQL code block — slides in when done typing answer */}
+                  {aiPhase === "done" && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.3 }}
+                      className="rounded-xl border border-[#30363d] bg-[#0d1117] overflow-hidden"
+                    >
+                      <div className="px-3 py-1.5 border-b border-[#30363d] bg-[#161b22] flex justify-between items-center">
+                        <span className="text-[10px] text-[#8b949e] font-mono uppercase tracking-wide">sql</span>
+                        <span className="text-[10px] text-[#8b949e]">Copy</span>
+                      </div>
+                      <pre className="px-3 py-2.5 text-[11px] font-mono text-[#7ee787] overflow-x-auto leading-relaxed whitespace-pre">{aiPrompt.sql}</pre>
+                      <div className="px-3 py-2 border-t border-[#30363d] bg-[#161b22] flex gap-2">
+                        <button className="btn-secondary text-[10px] py-1 px-2 flex-1 flex items-center justify-center gap-1">
+                          <FontAwesomeIcon icon={faArrowRight} className="text-[10px]" />
+                          Use in Editor
+                        </button>
+                        <button className="btn-primary text-[10px] py-1 px-2 flex-1 flex items-center justify-center gap-1">
+                          <FontAwesomeIcon icon={faPlay} className="text-[10px]" />
+                          Execute
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Input */}
+          <div className="shrink-0 border-t border-surface-border p-2">
+            <div className="relative">
+              <input
+                placeholder="Ask about your database…"
+                className="w-full bg-surface-100 border border-surface-border rounded-xl pl-3 pr-10 py-2 text-xs text-fg-base placeholder:text-fg-subtle focus:outline-none focus:border-brand-500 transition-colors"
+                readOnly
+              />
+              <button className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center justify-center w-6 h-6 rounded-lg bg-brand-600 hover:bg-brand-500 transition-colors">
+                <FontAwesomeIcon icon={faWandMagicSparkles} className="text-white text-[10px]" />
+              </button>
+            </div>
+            <p className="text-[10px] text-fg-subtle text-center mt-1.5">↵ to send · ⇧↵ newline</p>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+/* ================================================================== */
 /*  LANDING PAGE                                                       */
 /* ================================================================== */
 export default function LandingPage() {
@@ -775,6 +1306,65 @@ export default function LandingPage() {
             </FadeIn>
           </div>
         </motion.div>
+      </section>
+
+      {/* ── Query Editor Live Demo ─────────────────────────────── */}
+      <section id="query-editor" className="relative py-20 md:py-32">
+        <div className="max-w-7xl mx-auto px-6">
+          <FadeIn className="text-center mb-12">
+            <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-600/10 border border-brand-500/20 text-xs font-semibold text-brand-400 uppercase tracking-widest mb-4">
+              <FontAwesomeIcon icon={faTerminal} className="text-[10px]" />
+              Query Editor
+            </span>
+            <h2 className="text-3xl md:text-5xl font-bold text-fg-strong mb-4 tracking-tight">
+              Write SQL. See results instantly.
+            </h2>
+            <p className="text-fg-muted max-w-2xl mx-auto text-lg">
+              A full-featured SQL editor right in your browser — syntax highlighting,
+              schema browser, query history, live results, and an AI assistant that
+              understands your schema.
+            </p>
+          </FadeIn>
+
+          {/* Feature pills row */}
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-12">
+            {[
+              { icon: faCode,             label: "Syntax Highlighting", desc: "Keywords, tables, and columns colored in real-time" },
+              { icon: faWandMagicSparkles, label: "AI SQL Assistant",    desc: "Ask in plain English, get runnable queries instantly" },
+              { icon: faClockRotateLeft,  label: "Query History",        desc: "Every query saved with execution time and row count" },
+              { icon: faDiagramProject,  label: "ERD Generator",        desc: "Auto-generate entity-relationship diagrams on click" },
+            ].map((item, i) => (
+              <FadeIn key={item.label} delay={i * 0.07}>
+                <div className="flex items-start gap-3 p-4 rounded-xl bg-surface-50 border border-surface-border h-full">
+                  <div className="w-8 h-8 rounded-lg bg-brand-600/15 border border-brand-500/25 flex items-center justify-center shrink-0 mt-0.5">
+                    <FontAwesomeIcon icon={item.icon} className="text-brand-400 text-xs" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-fg-strong mb-1">{item.label}</p>
+                    <p className="text-xs text-fg-muted leading-relaxed">{item.desc}</p>
+                  </div>
+                </div>
+              </FadeIn>
+            ))}
+          </div>
+
+          {/* Interactive demo */}
+          <div className="relative">
+            <div className="absolute -inset-8 bg-gradient-radial from-brand-500/10 via-transparent to-transparent rounded-3xl blur-3xl pointer-events-none" />
+            <QueryEditorDemo />
+          </div>
+
+          {/* Hint below demo */}
+          <FadeIn delay={0.2}>
+            <p className="text-center text-sm text-fg-subtle mt-6 flex items-center justify-center gap-2">
+              <motion.span animate={{ opacity: [0.5, 1, 0.5] }} transition={{ duration: 2, repeat: Infinity }}>
+                ↑
+              </motion.span>
+              Click <span className="text-brand-400 font-medium">Run</span> to execute a query · Switch queries with the tabs · Toggle
+              <span className="text-brand-400 font-medium ml-1">AI</span> to open the assistant
+            </p>
+          </FadeIn>
+        </div>
       </section>
 
       {/* ── Engine Marquee ─────────────────────────────────────── */}
